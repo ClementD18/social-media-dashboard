@@ -302,6 +302,10 @@ export default function Dashboard() {
               linkCol,
             ]} />
         </>)}
+     {/* Footer */}
+        <div style={{ marginTop: 40, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.08)", textAlign: "center" }}>
+          <p style={{ color: "rgba(255,255,255,0.25)", fontSize: 11, margin: 0 }}>© 2026 Clément Dubois — Tous droits réservés</p>
+        </div>
       </div>
     </div>
   );
