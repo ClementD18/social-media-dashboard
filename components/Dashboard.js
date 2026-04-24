@@ -27,10 +27,12 @@ const platformIcon = p => {
 };
 
 function mapRow(row) {
+  const keys = Object.keys(row);
   const g = k => { const v = row[k]; return (v !== undefined && v !== null && v !== "") ? v : null; };
+  const isTikTok = keys.some(k => k.includes("authorMeta") || k === "playCount" || k === "diggCount");
 
   // TikTok
-  if (g("authorMeta.name") || g("playCount") || g("diggCount")) {
+  if (isTikTok) {
     return {
       compte: g("authorMeta.name") || "\u2014",
       date: g("createTimeISO"),
