@@ -18,10 +18,53 @@ const calcEng = r => { const v = Number(r.views) || 0, l = Number(r.likes) || 0,
 const renderEng = r => { const e = calcEng(r); return e > 0 ? <span style={{ color: "#34d399", fontWeight: 600 }}>{(e * 100).toFixed(2)}%</span> : "\u2014"; };
 const cleanCap = c => (c || "").replace(/[^\w\s\u00e0\u00e2\u00e4\u00e9\u00e8\u00ea\u00eb\u00ef\u00ee\u00f4\u00f9\u00fb\u00fc\u00e7\u0153\u00e6\u00c0\u00c2\u00c4\u00c9\u00c8\u00ca\u00cb\u00cf\u00ce\u00d4\u00d9\u00db\u00dc\u00c7\u0152\u00c6.,!?:()@#%\u20ac$\u00a3&+\-'/]/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
 
+const platformIcon = p => {
+  if (p === "tiktok") return "\ud83c\udfb5";
+  if (p === "instagram") return "\ud83d\udcf8";
+  if (p === "facebook") return "\ud83d\udcd8";
+  if (p === "youtube") return "\u25b6\ufe0f";
+  return "\ud83d\udcf1";
+};
+
 function mapRow(row) {
   const g = k => { const v = row[k]; return (v !== undefined && v !== null && v !== "") ? v : null; };
+
+  // TikTok
+  if (g("authorMeta.name") || g("playCount") || g("diggCount")) {
+    return {
+      compte: g("authorMeta.name") || "\u2014",
+      date: g("createTimeISO"),
+      type: "Video",
+      caption: g("text") || "\u2014",
+      views: g("playCount"),
+      likes: g("diggCount"),
+      comments: g("commentCount"),
+      shares: g("shareCount"),
+      saves: g("collectCount"),
+      duration: g("videoMeta.duration"),
+      url: g("webVideoUrl") || "",
+      isPaid: null,
+      platform: "tiktok"
+    };
+  }
+
+  // Instagram
   const paid = g("isPaidPartnership") || g("paidPartnership") || g("is_paid_partnership") || g("paid_partnership") || g("brandedContentTagName") || g("branded_content_tag_name") || g("sponsorTags/0") || g("sponsor_tags/0");
-  return { compte: g("ownerUsername") || g("ownerFullName") || "\u2014", date: g("timestamp"), type: g("type") || g("productType") || "", caption: g("caption") || "\u2014", views: g("videoViewCount") ?? g("videoPlayCount"), likes: g("likesCount"), comments: g("commentsCount"), shares: g("sharesCount"), url: g("url") || "", isPaid: paid };
+  return {
+    compte: g("ownerUsername") || g("ownerFullName") || "\u2014",
+    date: g("timestamp"),
+    type: g("type") || g("productType") || "",
+    caption: g("caption") || "\u2014",
+    views: g("videoViewCount") ?? g("videoPlayCount"),
+    likes: g("likesCount"),
+    comments: g("commentsCount"),
+    shares: g("sharesCount"),
+    saves: null,
+    duration: g("videoDuration"),
+    url: g("url") || "",
+    isPaid: paid,
+    platform: "instagram"
+  };
 }
 
 const MANUAL_EXCLUDE = [
@@ -63,6 +106,9 @@ const MANUAL_EXCLUDE = [
   "https://www.instagram.com/p/DXE3tShhQCz/","https://www.instagram.com/p/DWmZo1ZAQv4/",
   "https://www.instagram.com/p/DWt5rfdDp-t/","https://www.instagram.com/p/DW9XDyEFPjJ/",
   "https://www.instagram.com/p/DXH3p-FCl_4/",
+  "https://www.instagram.com/p/DW8fnkvkqBh/",
+  "https://www.instagram.com/p/DW4fGfZCT9_/",
+  "https://www.instagram.com/p/DUBmzk0jlZM/",
 ];
 
 function exportXLSX(data, headers, sheetName, fileName) {
@@ -80,13 +126,7 @@ function SortTable({ data, columns, gridCols, exportData, exportHeaders, exportN
   let list = [...data];
   if (q) { const s = q.toLowerCase(); list = list.filter(r => columns.some(c => String(r[c.key] || "").toLowerCase().includes(s))); }
   if (sc) { list.sort((a, b) => { let va = a[sc] ?? -Infinity, vb = b[sc] ?? -Infinity; const na = Number(va), nb = Number(vb); if (!isNaN(na) && !isNaN(nb)) return sa ? na - nb : nb - na; return sa ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va)); }); }
-
-  const handleExport = () => {
-    if (!exportData) return;
-    const rows = exportData(list);
-    exportXLSX(rows, exportHeaders, exportName || "Export", (exportName || "export") + ".xlsx");
-  };
-
+  const handleExport = () => { if (!exportData) return; exportXLSX(exportData(list), exportHeaders, exportName || "Export", (exportName || "export") + ".xlsx"); };
   return (<>
     <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
       <input value={q} onChange={e => setQ(e.target.value)} placeholder={searchPlaceholder || "\ud83d\udd0d Rechercher..."} style={{ flex: 1, padding: 7, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#fff", fontSize: 13, outline: "none" }} />
@@ -107,36 +147,54 @@ function SortTable({ data, columns, gridCols, exportData, exportHeaders, exportN
 }
 
 const linkCol = { key: "url", label: "\ud83d\udd17", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "#6366f1" }}>{"\ud83d\udd17"}</a> : "\u2014" };
+const platCol = { key: "platform", label: "Plat.", render: r => <span title={r.platform}>{platformIcon(r.platform)}</span> };
 const KPI = ({ items }) => <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8, marginBottom: 12 }}>{items.map(([l,v,c]) => <div key={l} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "10px 12px" }}><div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>{l}</div><div style={{ fontSize: 18, fontWeight: 700, color: c }}>{v}</div></div>)}</div>;
 
-// Export row builders
-const expContenus = rows => rows.map(r => { const e = calcEng(r); return [r.compte, fmtDate(r.date), r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
+const expContenus = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", r.shares ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
 const expMarques = rows => rows.map(b => [b.compte, b.nbVideos, Math.round(b.avgViews), (b.avgEngagement*100).toFixed(2)+"%", b.nbViral]);
-const expViraux = rows => rows.map(r => { const e = calcEng(r); return [r.compte, fmtDate(r.date), cleanCap(r.caption), r.views ?? "", r.avgCompte ?? "", r.ratio ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.tempType || "", r.url]; });
-const expSuspects = rows => rows.map(r => [r.compte, fmtDate(r.date), cleanCap(r.caption), r.views ?? "", r.ratioVues ?? "", (r.eng*100).toFixed(2)+"%", (r.avgEngCompte*100).toFixed(2)+"%", r.url]);
-const expSponso = rows => rows.map(r => { const e = calcEng(r); return [r.compte, fmtDate(r.date), r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
+const expViraux = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), cleanCap(r.caption), r.views ?? "", r.avgCompte ?? "", r.ratio ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.tempType || "", r.url]; });
+const expSuspects = rows => rows.map(r => [r.platform, r.compte, fmtDate(r.date), cleanCap(r.caption), r.views ?? "", r.ratioVues ?? "", (r.eng*100).toFixed(2)+"%", (r.avgEngCompte*100).toFixed(2)+"%", r.url]);
+const expSponso = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
 
-const hContenus = ["Compte","Date","Type","Caption","Vues","Likes","Com.","Engagement","URL"];
+const hContenus = ["Plateforme","Compte","Date","Type","Caption","Vues","Likes","Com.","Partages","Engagement","URL"];
 const hMarques = ["Compte","Vid\u00e9os","Moy. vues","Engagement","Virales"];
-const hViraux = ["Compte","Date","Caption","Vues","Moy.","Ratio","Engagement","Type","URL"];
-const hSuspects = ["Compte","Date","Caption","Vues","Ratio","Engagement","Moy. eng.","URL"];
-const hSponso = ["Compte","Date","Type","Caption","Vues","Likes","Com.","Engagement","URL"];
+const hViraux = ["Plateforme","Compte","Date","Caption","Vues","Moy.","Ratio","Engagement","Type","URL"];
+const hSuspects = ["Plateforme","Compte","Date","Caption","Vues","Ratio","Engagement","Moy. eng.","URL"];
+const hSponso = ["Plateforme","Compte","Date","Type","Caption","Vues","Likes","Com.","Engagement","URL"];
 
 export default function Dashboard() {
   const [rows, setRows] = useState([]);
   const [drag, setDrag] = useState(false);
-  const [file, setFile] = useState("");
+  const [files, setFiles] = useState([]);
   const [page, setPage] = useState("contenus");
   const [manualExclude, setManualExclude] = useState(MANUAL_EXCLUDE);
   const [viralFilter, setViralFilter] = useState("froid");
 
-  const load = useCallback((f) => {
-    setFile(f.name);
-    Papa.parse(f, { header: true, dynamicTyping: true, skipEmptyLines: true, complete: (r) => setRows(r.data.map(mapRow).filter(x => x.date || x.caption !== "\u2014")) });
+  const loadFile = useCallback((f) => {
+    Papa.parse(f, { header: true, dynamicTyping: true, skipEmptyLines: true, complete: (r) => {
+      const mapped = r.data.map(mapRow).filter(x => x.date || x.caption !== "\u2014");
+      setRows(prev => [...prev, ...mapped]);
+      setFiles(prev => [...prev, f.name]);
+    }});
   }, []);
 
+  const handleDrop = useCallback((e) => {
+    e.preventDefault(); setDrag(false);
+    const fileList = e.dataTransfer?.files;
+    if (fileList) Array.from(fileList).forEach(f => loadFile(f));
+  }, [loadFile]);
+
+  const handleFileInput = useCallback((e) => {
+    const fileList = e.target.files;
+    if (fileList) Array.from(fileList).forEach(f => loadFile(f));
+  }, [loadFile]);
+
+  const platformCounts = useMemo(() => {
+    return { instagram: rows.filter(r => r.platform === "instagram").length, tiktok: rows.filter(r => r.platform === "tiktok").length };
+  }, [rows]);
+
   const { brands, viralRows, suspectRows } = useMemo(() => {
-    const videos = rows.filter(r => isVideo(r.type));
+    const videos = rows.filter(r => isVideo(r.type) || r.platform === "tiktok");
     const grouped = _.groupBy(videos, "compte");
     const brandsArr = Object.entries(grouped).filter(([c, vids]) => vids.length >= 3).map(([compte, vids]) => {
       const vl = vids.map(v => Number(v.views) || 0);
@@ -145,7 +203,8 @@ export default function Dashboard() {
       const nv = vl.filter(v => v >= thr).length;
       const engs = vids.map(v => calcEng(v));
       const ae = engs.length ? _.mean(engs) : 0;
-      return { compte, nbVideos: vids.length, avgViews: avg, nbViral: nv, avgEngagement: ae, vids };
+      const platforms = _.uniq(vids.map(v => v.platform));
+      return { compte, nbVideos: vids.length, avgViews: avg, nbViral: nv, avgEngagement: ae, vids, platforms };
     });
     const viral = [];
     brandsArr.forEach(b => { const thr = b.avgViews * 2.5; b.vids.forEach(v => { const views = Number(v.views) || 0; if (views >= thr) viral.push({ ...v, avgCompte: Math.round(b.avgViews), ratio: b.avgViews > 0 ? (views / b.avgViews).toFixed(1) : "\u2014" }); }); });
@@ -171,7 +230,6 @@ export default function Dashboard() {
 
   const nbFroid = viralWithType.filter(r => r.tempType === "froid").length;
   const nbChaud = viralWithType.filter(r => r.tempType === "chaud").length;
-
   const handleManualExclude = (url) => setManualExclude(prev => [...prev, url]);
   const handleManualInclude = (url) => setManualExclude(prev => prev.filter(u => u.replace(/\/$/, "") !== url.replace(/\/$/, "")));
 
@@ -184,28 +242,43 @@ export default function Dashboard() {
   const TABS = [["contenus","\ud83d\udcdd Contenus"],["marques","\ud83c\udfe2 Marques"],["viraux","\ud83d\udd25 Viraux"],["suspects","\ud83e\udd14 Suspects"],["sponso","\ud83e\udd1d Sponsos"]];
   const badge = (k) => { const map = { viraux: [nbFroid + "/" + viralRows.length,"#fbbf24"], suspects: [suspectRows.length,"#f472b6"], sponso: [sponsoRows.length,"#34d399"] }; const m = map[k]; if (!m) return null; return <span style={{ marginLeft: 6, padding: "2px 7px", borderRadius: 10, background: m[1]+"33", color: m[1], fontSize: 11 }}>{m[0]}</span>; };
 
+  // UPLOAD SCREEN
   if (!rows.length) return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg,#0f0f23,#1a1a3e)", fontFamily: "system-ui", padding: 20 }}>
-      <div onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={e => { e.preventDefault(); setDrag(false); if (e.dataTransfer?.files?.[0]) load(e.dataTransfer.files[0]); }} onClick={() => document.getElementById("up").click()}
-        style={{ border: drag ? "2px dashed #6366f1" : "2px dashed rgba(255,255,255,0.15)", background: drag ? "rgba(99,102,241,0.1)" : "rgba(255,255,255,0.04)", borderRadius: 20, padding: "56px 40px", maxWidth: 460, width: "100%", textAlign: "center", cursor: "pointer" }}>
+      <div onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={handleDrop} onClick={() => document.getElementById("up").click()}
+        style={{ border: drag ? "2px dashed #6366f1" : "2px dashed rgba(255,255,255,0.15)", background: drag ? "rgba(99,102,241,0.1)" : "rgba(255,255,255,0.04)", borderRadius: 20, padding: "56px 40px", maxWidth: 520, width: "100%", textAlign: "center", cursor: "pointer" }}>
         <div style={{ fontSize: 52, marginBottom: 14 }}>{"\ud83d\udcc2"}</div>
-        <h1 style={{ color: "#fff", fontSize: 20, margin: "0 0 8px" }}>Importe ton fichier Apify</h1>
-        <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 13, margin: "0 0 22px", lineHeight: 1.5 }}>Glisse-d\u00e9pose ton CSV ici<br/>ou clique pour s\u00e9lectionner</p>
-        <div style={{ display: "inline-block", padding: "10px 24px", borderRadius: 10, background: "#6366f1", color: "#fff", fontSize: 14, fontWeight: 600 }}>{"\ud83d\udce5"} Choisir un fichier</div>
-        <input id="up" type="file" accept=".csv" onChange={e => { if (e.target.files?.[0]) load(e.target.files[0]); }} style={{ display: "none" }} />
+        <h1 style={{ color: "#fff", fontSize: 20, margin: "0 0 8px" }}>Importe tes fichiers</h1>
+        <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 13, margin: "0 0 22px", lineHeight: 1.5 }}>Glisse tes CSV ici (Instagram + TikTok)<br/>Tu peux en importer plusieurs d'un coup</p>
+        <div style={{ display: "flex", gap: 12, justifyContent: "center", marginBottom: 16 }}>
+          <span style={{ padding: "6px 14px", borderRadius: 8, background: "rgba(225,48,108,0.15)", color: "#E1306C", fontSize: 13 }}>{"\ud83d\udcf8"} Instagram</span>
+          <span style={{ padding: "6px 14px", borderRadius: 8, background: "rgba(0,0,0,0.3)", color: "#fff", fontSize: 13 }}>{"\ud83c\udfb5"} TikTok</span>
+        </div>
+        <div style={{ display: "inline-block", padding: "10px 24px", borderRadius: 10, background: "#6366f1", color: "#fff", fontSize: 14, fontWeight: 600 }}>{"\ud83d\udce5"} Choisir des fichiers</div>
+        <input id="up" type="file" accept=".csv" multiple onChange={handleFileInput} style={{ display: "none" }} />
       </div>
     </div>
   );
 
+  // MAIN
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#0f0f23,#1a1a3e)", fontFamily: "system-ui", color: "#fff", padding: "20px 16px" }}>
       <div style={{ maxWidth: 1150, margin: "0 auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <div>
             <h1 style={{ fontSize: 18, margin: 0 }}>{"\ud83d\udcca"} Social Media Dashboard</h1>
-            <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, margin: 0 }}>{"\ud83d\udcc4"} {file} \u2014 {rows.length} posts \u00b7 {brands.length} comptes</p>
+            <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, margin: 0 }}>
+              {files.map((f, i) => <span key={i}>{"\ud83d\udcc4"} {f}{i < files.length - 1 ? " \u00b7 " : ""}</span>)}
+              {" \u2014 "}{rows.length} posts \u00b7 {brands.length} comptes
+              {platformCounts.instagram > 0 && <span style={{ marginLeft: 8, padding: "1px 6px", borderRadius: 6, background: "rgba(225,48,108,0.15)", color: "#E1306C", fontSize: 11 }}>{"\ud83d\udcf8"} {platformCounts.instagram}</span>}
+              {platformCounts.tiktok > 0 && <span style={{ marginLeft: 4, padding: "1px 6px", borderRadius: 6, background: "rgba(255,255,255,0.1)", color: "#fff", fontSize: 11 }}>{"\ud83c\udfb5"} {platformCounts.tiktok}</span>}
+            </p>
           </div>
-          <button onClick={() => { setRows([]); setFile(""); }} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)", fontSize: 12, cursor: "pointer" }}>{"\ud83d\udd04"} Nouveau</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => document.getElementById("up2").click()} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(99,102,241,0.4)", background: "rgba(99,102,241,0.1)", color: "#818cf8", fontSize: 12, cursor: "pointer" }}>{"\u2795"} Ajouter CSV</button>
+            <input id="up2" type="file" accept=".csv" multiple onChange={handleFileInput} style={{ display: "none" }} />
+            <button onClick={() => { setRows([]); setFiles([]); }} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)", fontSize: 12, cursor: "pointer" }}>{"\ud83d\udd04"} Reset</button>
+          </div>
         </div>
 
         <div style={{ display: "flex", gap: 4, marginBottom: 16, flexWrap: "wrap" }}>
@@ -217,9 +290,10 @@ export default function Dashboard() {
         </div>
 
         {page === "contenus" && (<>
-          <KPI items={[["\ud83d\udcdd Posts", rows.length, "#a78bfa"], ["\ud83c\udfac Vid\u00e9os", rows.filter(r => isVideo(r.type)).length, "#c084fc"], ["\ud83d\udc41 Vues", fmt(tot("views")), "#818cf8"], ["\u2764\ufe0f Likes", fmt(tot("likes")), "#f472b6"], ["\ud83d\udcac Com.", fmt(tot("comments")), "#60a5fa"]]} />
-          <SortTable data={rows} gridCols="100px 80px 40px 1fr 80px 65px 60px 75px" exportData={expContenus} exportHeaders={hContenus} exportName="contenus"
+          <KPI items={[["\ud83d\udcdd Posts", rows.length, "#a78bfa"], ["\ud83c\udfac Vid\u00e9os", rows.filter(r => isVideo(r.type) || r.platform === "tiktok").length, "#c084fc"], ["\ud83d\udc41 Vues", fmt(tot("views")), "#818cf8"], ["\u2764\ufe0f Likes", fmt(tot("likes")), "#f472b6"], ["\ud83d\udcac Com.", fmt(tot("comments")), "#60a5fa"]]} />
+          <SortTable data={rows} gridCols="35px 100px 80px 40px 1fr 80px 65px 60px 75px" exportData={expContenus} exportHeaders={hContenus} exportName="contenus"
             columns={[
+              platCol,
               { key: "compte", label: "Compte", bold: true, color: "#fff" },
               { key: "date", label: "Date", render: r => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
               { key: "type", label: "", render: r => typeIcon(r.type) },
@@ -233,9 +307,10 @@ export default function Dashboard() {
 
         {page === "marques" && (<>
           <KPI items={[["\ud83c\udfe2 Comptes", brands.length, "#a78bfa"], ["\ud83c\udfac Vid\u00e9os", fmt(_.sumBy(brands, "nbVideos")), "#818cf8"], ["\ud83d\udc41 Moy. vues", fmt(Math.round(_.meanBy(brands, "avgViews") || 0)), "#f472b6"], ["\ud83d\udd25 Virales", fmt(_.sumBy(brands, "nbViral")), "#fbbf24"]]} />
-          <SortTable data={brands} gridCols="1fr 120px 140px 120px 170px" exportData={expMarques} exportHeaders={hMarques} exportName="marques" searchPlaceholder={"\ud83d\udd0d Rechercher un compte..."}
+          <SortTable data={brands} gridCols="1fr 100px 120px 140px 100px 160px" exportData={expMarques} exportHeaders={hMarques} exportName="marques" searchPlaceholder={"\ud83d\udd0d Rechercher un compte..."}
             columns={[
               { key: "compte", label: "Compte", bold: true, color: "#fff" },
+              { key: "platforms", label: "Plat.", render: r => r.platforms?.map(p => platformIcon(p)).join(" ") },
               { key: "nbVideos", label: "Vid\u00e9os", bold: true, color: "#818cf8" },
               { key: "avgViews", label: "Moy. vues", render: r => fmt(Math.round(r.avgViews)), bold: true, color: "#f472b6" },
               { key: "avgEngagement", label: "Engage.", render: r => <span style={{ color: "#34d399", fontWeight: 600 }}>{(r.avgEngagement * 100).toFixed(2)}%</span> },
@@ -249,10 +324,11 @@ export default function Dashboard() {
             {[["froid", "\u2744\ufe0f Froid", "#60a5fa"], ["chaud", "\ud83d\udd25 Chaud", "#ef4444"], ["all", "Tous", "rgba(255,255,255,0.5)"]].map(([k, l, c]) => (
               <button key={k} onClick={() => setViralFilter(k)} style={{ padding: "7px 14px", borderRadius: 8, border: viralFilter === k ? "1px solid " + c : "1px solid rgba(255,255,255,0.1)", background: viralFilter === k ? c + "22" : "transparent", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: viralFilter === k ? 600 : 400 }}>{l}</button>
             ))}
-            <span style={{ marginLeft: "auto", fontSize: 11, color: "rgba(255,255,255,0.3)" }}>Clique \u2715 pour exclure une vid\u00e9o</span>
+            <span style={{ marginLeft: "auto", fontSize: 11, color: "rgba(255,255,255,0.3)" }}>Clique \u2715 pour exclure</span>
           </div>
-          <SortTable data={filteredViral} gridCols="100px 75px 1fr 85px 80px 55px 70px 55px 40px" exportData={expViraux} exportHeaders={hViraux} exportName="viraux"
+          <SortTable data={filteredViral} gridCols="35px 100px 75px 1fr 85px 80px 55px 70px 50px 35px 35px" exportData={expViraux} exportHeaders={hViraux} exportName="viraux"
             columns={[
+              platCol,
               { key: "compte", label: "Compte", bold: true, color: "#fff" },
               { key: "date", label: "Date", render: r => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
               { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 90)}</a> : r.caption?.slice(0, 90) },
@@ -274,8 +350,9 @@ export default function Dashboard() {
             <p style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", margin: 0 }}>{"\ud83e\udd14"} Vues &gt; 1.5x la moyenne du compte et engagement &lt; 1% \u2014 <strong style={{ color: "#fff" }}>{suspectRows.length} vid\u00e9os</strong></p>
           </div>
           <KPI items={[["\ud83e\udd14 Suspects", suspectRows.length, "#f472b6"], ["\ud83c\udfe2 Comptes", _.uniqBy(suspectRows, "compte").length, "#a78bfa"], ["\ud83d\udc41 Vues moy.", fmt(Math.round(_.meanBy(suspectRows, r => Number(r.views) || 0) || 0)), "#818cf8"]]} />
-          <SortTable data={suspectRows} gridCols="100px 75px 1fr 85px 65px 75px 75px 40px" exportData={expSuspects} exportHeaders={hSuspects} exportName="suspects"
+          <SortTable data={suspectRows} gridCols="35px 100px 75px 1fr 85px 65px 75px 75px 35px" exportData={expSuspects} exportHeaders={hSuspects} exportName="suspects"
             columns={[
+              platCol,
               { key: "compte", label: "Compte", bold: true, color: "#fff" },
               { key: "date", label: "Date", render: r => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
               { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 90)}</a> : r.caption?.slice(0, 90) },
@@ -289,8 +366,9 @@ export default function Dashboard() {
 
         {page === "sponso" && (<>
           <KPI items={[["\ud83e\udd1d Sponsos", sponsoRows.length, "#34d399"], ["\ud83c\udfe2 Comptes", _.uniqBy(sponsoRows, "compte").length, "#a78bfa"], ["\ud83d\udc41 Vues moy.", fmt(Math.round(_.meanBy(sponsoRows, r => Number(r.views) || 0) || 0)), "#818cf8"], ["\u2764\ufe0f Likes moy.", fmt(Math.round(_.meanBy(sponsoRows, r => Number(r.likes) || 0) || 0)), "#f472b6"]]} />
-          <SortTable data={sponsoRows} gridCols="100px 80px 40px 1fr 80px 65px 60px 75px 40px" exportData={expSponso} exportHeaders={hSponso} exportName="sponso"
+          <SortTable data={sponsoRows} gridCols="35px 100px 80px 40px 1fr 80px 65px 60px 75px 35px" exportData={expSponso} exportHeaders={hSponso} exportName="sponso"
             columns={[
+              platCol,
               { key: "compte", label: "Compte", bold: true, color: "#fff" },
               { key: "date", label: "Date", render: r => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
               { key: "type", label: "", render: r => typeIcon(r.type) },
@@ -302,9 +380,10 @@ export default function Dashboard() {
               linkCol,
             ]} />
         </>)}
-     {/* Footer */}
+
+        {/* Footer */}
         <div style={{ marginTop: 40, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.08)", textAlign: "center" }}>
-          <p style={{ color: "rgba(255,255,255,0.25)", fontSize: 11, margin: 0 }}>© 2026 Clément Dubois — Tous droits réservés</p>
+          <p style={{ color: "rgba(255,255,255,0.25)", fontSize: 11, margin: 0 }}>\u00a9 2026 Cl\u00e9ment Dubois \u2014 Tous droits r\u00e9serv\u00e9s</p>
         </div>
       </div>
     </div>
