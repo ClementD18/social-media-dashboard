@@ -52,6 +52,15 @@ function mapRow(row) {
 
   // Instagram
   const paid = g("isPaidPartnership") || g("paidPartnership") || g("is_paid_partnership") || g("paid_partnership") || g("brandedContentTagName") || g("branded_content_tag_name") || g("sponsorTags/0") || g("sponsor_tags/0");
+  const weekNum = (() => {
+  if (!g("timestamp") && !g("createTimeISO")) return null;
+  const d = new Date(g("timestamp") || g("createTimeISO"));
+  if (isNaN(d)) return null;
+  // S17 = 20-26 avril 2026
+  const ref = new Date(2026, 3, 20); // 20 avril 2026 = début S17
+  const diff = Math.floor((d - ref) / (7 * 24 * 60 * 60 * 1000));
+  return "S" + (17 + diff);
+})();
   return {
     compte: g("ownerUsername") || g("ownerFullName") || "\u2014",
     date: g("timestamp"),
