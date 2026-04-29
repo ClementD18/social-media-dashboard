@@ -3,399 +3,1202 @@ import Papa from "papaparse";
 import _ from "lodash";
 import * as XLSX from "xlsx";
 
-const fmt = v => {
-  if (v === null || v === undefined || v === "") return "\u2014";
+/* ──────────────────────────────────────────────
+   HELPERS
+   ────────────────────────────────────────────── */
+const fmt = (v) => {
+  if (v === null || v === undefined || v === "") return "—";
   const n = Number(v);
-  if (isNaN(n)) return "\u2014";
+  if (isNaN(n)) return "—";
   if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
   if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
   return n.toLocaleString("fr-FR");
 };
-const fmtDate = v => { if (!v) return "\u2014"; try { const d = new Date(v); return isNaN(d) ? "\u2014" : d.toLocaleDateString("fr-FR"); } catch { return "\u2014"; } };
-const typeIcon = t => { if (!t) return "\ud83d\udcdd"; const l = t.toLowerCase(); if (l.includes("video") || l.includes("reel")) return "\ud83c\udfac"; if (l.includes("sidecar") || l.includes("carousel")) return "\ud83d\udcf8"; return "\ud83d\uddbc"; };
-const isVideo = t => { if (!t) return false; const l = t.toLowerCase(); return l.includes("video") || l.includes("reel"); };
-const calcEng = r => { const v = Number(r.views) || 0, l = Number(r.likes) || 0, c = Number(r.comments) || 0; return v > 0 ? (l + c) / v : 0; };
-const renderEng = r => { const e = calcEng(r); return e > 0 ? <span style={{ color: "#34d399", fontWeight: 600 }}>{(e * 100).toFixed(2)}%</span> : "\u2014"; };
-const cleanCap = c => (c || "").replace(/[^\w\s\u00e0\u00e2\u00e4\u00e9\u00e8\u00ea\u00eb\u00ef\u00ee\u00f4\u00f9\u00fb\u00fc\u00e7\u0153\u00e6\u00c0\u00c2\u00c4\u00c9\u00c8\u00ca\u00cb\u00cf\u00ce\u00d4\u00d9\u00db\u00dc\u00c7\u0152\u00c6.,!?:()@#%\u20ac$\u00a3&+\-'/]/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
 
-const platformIcon = p => {
-  if (p === "tiktok") return "\ud83c\udfb5";
-  if (p === "instagram") return "\ud83d\udcf8";
-  if (p === "facebook") return "\ud83d\udcd8";
-  if (p === "youtube") return "\u25b6\ufe0f";
-  return "\ud83d\udcf1";
+const fmtDate = (v) => {
+  if (!v) return "—";
+  try {
+    const d = new Date(v);
+    return isNaN(d) ? v : d.toLocaleDateString("fr-FR");
+  } catch {
+    return v;
+  }
 };
 
-function mapRow(row) {
-  const keys = Object.keys(row);
-  const g = k => { const v = row[k]; return (v !== undefined && v !== null && v !== "") ? v : null; };
-  const isTikTok = keys.some(k => k.includes("authorMeta") || k === "playCount" || k === "diggCount");
+const fmtPct = (v) => {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = Number(v);
+  if (isNaN(n)) return "—";
+  return n.toFixed(2) + "%";
+};
 
-  // TikTok
-  if (isTikTok) {
-    return {
-      compte: g("authorMeta.name") || "\u2014",
-      date: g("createTimeISO"),
-      type: "Video",
-      caption: g("text") || "\u2014",
-      views: g("playCount"),
-      likes: g("diggCount"),
-      comments: g("commentCount"),
-      shares: g("shareCount"),
-      saves: g("collectCount"),
-      duration: g("videoMeta.duration"),
-      url: g("webVideoUrl") || "",
-      isPaid: null,
-      platform: "tiktok"
-    };
-  }
-
-  // Instagram
-  const paid = g("isPaidPartnership") || g("paidPartnership") || g("is_paid_partnership") || g("paid_partnership") || g("brandedContentTagName") || g("branded_content_tag_name") || g("sponsorTags/0") || g("sponsor_tags/0");
-  const weekNum = (() => {
-  if (!g("timestamp") && !g("createTimeISO")) return null;
-  const d = new Date(g("timestamp") || g("createTimeISO"));
+/* ISO week number */
+const getWeekNumber = (dateStr) => {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
   if (isNaN(d)) return null;
-  // S17 = 20-26 avril 2026
-  const ref = new Date(2026, 3, 20); // 20 avril 2026 = début S17
-  const diff = Math.floor((d - ref) / (7 * 24 * 60 * 60 * 1000));
-  return "S" + (17 + diff);
-})();
-  return {
-    compte: g("ownerUsername") || g("ownerFullName") || "\u2014",
-    date: g("timestamp"),
-    type: g("type") || g("productType") || "",
-    caption: g("caption") || "\u2014",
-    views: g("videoViewCount") ?? g("videoPlayCount"),
-    likes: g("likesCount"),
-    comments: g("commentsCount"),
-    shares: g("sharesCount"),
-    saves: null,
-    duration: g("videoDuration"),
-    url: g("url") || "",
-    isPaid: paid,
-    platform: "instagram"
-  };
-}
+  const tmp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  tmp.setUTCDate(tmp.getUTCDate() + 4 - (tmp.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
+  return Math.ceil(((tmp - yearStart) / 86400000 + 1) / 7);
+};
 
+const getWeekLabel = (dateStr) => {
+  const w = getWeekNumber(dateStr);
+  return w ? `S${w}` : "";
+};
+
+const getWeekRange = (dateStr) => {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (isNaN(d)) return "";
+  const day = d.getUTCDay() || 7;
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - day + 1);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const f = (dt) => dt.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+  return `${f(monday)} – ${f(sunday)}`;
+};
+
+/* ──────────────────────────────────────────────
+   MANUAL EXCLUDE LIST (hot content URLs)
+   ────────────────────────────────────────────── */
 const MANUAL_EXCLUDE = [
-  "https://www.instagram.com/p/DXEJYTTgP7j/","https://www.instagram.com/p/DWuNt9uCTYP/","https://www.instagram.com/p/DWwDoH2kccQ/",
-  "https://www.instagram.com/p/DXE3vlCjxJR/","https://www.instagram.com/p/DXEhh-LEQ4w/","https://www.instagram.com/p/DWtc3aLkWZY/",
-  "https://www.instagram.com/p/DW9YSNTiBas/","https://www.instagram.com/p/DW9MyLHADzl/","https://www.instagram.com/p/DXH0icfCtO3/",
-  "https://www.instagram.com/p/DXJhyrSkb8R/","https://www.instagram.com/p/DW6oQokgA-K/","https://www.instagram.com/p/DW4bgLtmsux/",
-  "https://www.instagram.com/p/DWoVFs6D9Tn/","https://www.instagram.com/p/DXG7m7HjZiI/","https://www.instagram.com/p/DW8ckyYkXpl/",
-  "https://www.instagram.com/p/DW8m-fHl0zo/","https://www.instagram.com/p/DW0_eKkkoPX/","https://www.instagram.com/p/DXJYFHbFMU8/",
-  "https://www.instagram.com/p/DWxqmgfjgox/","https://www.instagram.com/p/DMfyPiyywEL/",
-  "https://www.instagram.com/p/DRDO4GAAM83/","https://www.instagram.com/p/DWySn1ikX3K/",
-  "https://www.instagram.com/p/DWmZu1ID32u/","https://www.instagram.com/p/DWlfDf3Daiv/",
-  "https://www.instagram.com/p/DXEb3yyAmnP/","https://www.instagram.com/p/DXB-UB6lbwv/",
-  "https://www.instagram.com/p/DWIvDRtj20p/","https://www.instagram.com/p/DXCZwlZkfj9/",
-  "https://www.instagram.com/p/DXCRj8aj-ai/","https://www.instagram.com/p/DW3_p1PjYX4/",
-  "https://www.instagram.com/p/DXB1jsgicHX/","https://www.instagram.com/p/DUlGE3EjY1a/",
-  "https://www.instagram.com/p/DW8gor_Cgb1/","https://www.instagram.com/p/DW9aeQZCj9_/",
-  "https://www.instagram.com/p/DW8aaWPFPOn/","https://www.instagram.com/p/DXHOw0YgHm4/",
-  "https://www.instagram.com/p/DW09w2fD2Yz/","https://www.instagram.com/p/DXBi6x0CWyC/",
-  "https://www.instagram.com/p/DXKcviIgNBK/","https://www.instagram.com/p/DW9kw98lLaH/",
-  "https://www.instagram.com/p/DWjxinHCWEI/","https://www.instagram.com/p/DXE3uoJid7w/",
-  "https://www.instagram.com/p/DWpFg6JEZxL/","https://www.instagram.com/p/DWoq6xtkxy6/",
-  "https://www.instagram.com/p/DXFTMVdFPEy/","https://www.instagram.com/p/DWlTUBZDZCj/",
-  "https://www.instagram.com/p/DWzDCNCgY7r/","https://www.instagram.com/p/DWlrL9TAU5g/",
-  "https://www.instagram.com/p/DXH1GVYgKIH/","https://www.instagram.com/p/DW4LbArCAjF/",
-  "https://www.instagram.com/p/DW09kE7lIbh/","https://www.instagram.com/p/DXFZp8bk6O1/",
-  "https://www.instagram.com/p/DWo-C4TkUml/","https://www.instagram.com/p/DWrllqvk_7A/",
-  "https://www.instagram.com/p/DWqzJxdjjiZ/","https://www.instagram.com/p/DWrS1hdDJTB/",
-  "https://www.instagram.com/p/DXHZITEidY8/","https://www.instagram.com/p/DW9gNx4gm9V/",
-  "https://www.instagram.com/p/DWyJtH5inQK/","https://www.instagram.com/p/DWwo5OADidl/",
-  "https://www.instagram.com/p/DXJ5g7Sklgh/","https://www.instagram.com/p/DWmBdjgkfMF/",
-  "https://www.instagram.com/p/DW5rEZmCb2b/","https://www.instagram.com/p/DWmTf8sCLKP/",
-  "https://www.instagram.com/p/DW1jfs8jC2L/","https://www.instagram.com/p/DW9aeKvgO2a/",
-  "https://www.instagram.com/p/DW1frk6lLgW/","https://www.instagram.com/p/DWzK0f1iV1x/",
-  "https://www.instagram.com/p/DW1y_8ekZWj/","https://www.instagram.com/p/DXE1aGvAATH/",
-  "https://www.instagram.com/p/DWrJ31FDh0h/","https://www.instagram.com/p/DW-3KwSjTGr/",
-  "https://www.instagram.com/p/DXEuZOUinTA/","https://www.instagram.com/p/DW9oeDvjiIZ/",
-  "https://www.instagram.com/p/DXJVGuCCkkq/","https://www.instagram.com/p/DW9Pg-llBVk/",
-  "https://www.instagram.com/p/DXE3tShhQCz/","https://www.instagram.com/p/DWmZo1ZAQv4/",
-  "https://www.instagram.com/p/DWt5rfdDp-t/","https://www.instagram.com/p/DW9XDyEFPjJ/",
-  "https://www.instagram.com/p/DXH3p-FCl_4/",
-  "https://www.instagram.com/p/DW8fnkvkqBh/",
-  "https://www.instagram.com/p/DW4fGfZCT9_/",
-  "https://www.instagram.com/p/DUBmzk0jlZM/",
+  // ── Instagram ──
+  // Ajouter ici les URLs Instagram classées "chaud"
+  // "https://www.instagram.com/reel/XXXXX/",
+
+  // ── TikTok ──
+  // Ajouter ici les URLs TikTok classées "chaud"
+  // "https://www.tiktok.com/@user/video/XXXXX",
 ];
 
-function exportXLSX(data, headers, sheetName, fileName) {
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+/* ──────────────────────────────────────────────
+   COLUMN AUTO-DETECTION (Instagram + TikTok)
+   ────────────────────────────────────────────── */
+const COLUMN_MAPS = {
+  instagram: {
+    url: ["url", "inputUrl", "input_url", "postUrl", "post_url", "shortCode"],
+    date: ["timestamp", "date", "createDate", "created_at", "takenAt"],
+    caption: ["caption", "text", "description", "alt"],
+    likes: ["likesCount", "likes", "like_count", "diggCount"],
+    comments: ["commentsCount", "comments", "comment_count", "commentCount"],
+    views: ["videoViewCount", "views", "view_count", "playCount", "videoPlayCount"],
+    shares: ["sharesCount", "shares", "share_count", "shareCount"],
+    saves: ["savesCount", "saves", "save_count", "collectCount"],
+    owner: ["ownerUsername", "owner", "username", "author", "authorMeta/name", "uniqueId"],
+    followers: ["followersCount", "followers", "follower_count", "authorMeta/fans"],
+    type: ["type", "mediaType", "media_type"],
+    music: ["musicMeta/musicName", "music", "audio", "musicName"],
+    hashtags: ["hashtags", "challenges", "tags"],
+    sponsored: ["isSponsored", "isPaidPartnership", "branded", "is_paid_partnership"],
+    duration: ["videoDuration", "duration", "video_duration"],
+    er: ["engagementRate", "er", "engagement_rate"],
+  },
+  tiktok: {
+    url: ["webVideoUrl", "url", "video_url", "inputUrl", "input_url"],
+    date: ["createTimeISO", "createTime", "date", "created_at", "timestamp"],
+    caption: ["text", "desc", "caption", "description"],
+    likes: ["diggCount", "likes", "likesCount", "like_count", "stats/diggCount"],
+    comments: ["commentCount", "comments", "commentsCount", "comment_count", "stats/commentCount"],
+    views: ["playCount", "views", "videoViewCount", "view_count", "stats/playCount"],
+    shares: ["shareCount", "shares", "sharesCount", "share_count", "stats/shareCount"],
+    saves: ["collectCount", "saves", "savesCount", "save_count", "stats/collectCount"],
+    owner: ["authorMeta/name", "uniqueId", "author", "ownerUsername", "username", "authorMeta/uniqueId"],
+    followers: ["authorMeta/fans", "followers", "followersCount", "follower_count", "authorMeta/followers"],
+    type: ["type", "mediaType"],
+    music: ["musicMeta/musicName", "music", "audio", "musicName"],
+    hashtags: ["challenges", "hashtags", "tags"],
+    sponsored: ["isAd", "isPaidPartnership", "isSponsored", "branded"],
+    duration: ["videoMeta/duration", "duration", "videoDuration", "video_duration"],
+    er: ["engagementRate", "er", "engagement_rate"],
+  },
+};
+
+const detectPlatform = (headers) => {
+  const h = headers.map((c) => c.toLowerCase());
+  const tiktokSignals = ["diggcount", "playcountcount", "collectcount", "createtimeiso", "authormeta/name", "webvideourl", "uniqueid"];
+  const matchCount = tiktokSignals.filter((s) => h.some((hh) => hh.includes(s.toLowerCase()))).length;
+  return matchCount >= 2 ? "tiktok" : "instagram";
+};
+
+const resolveCol = (row, candidates) => {
+  for (const c of candidates) {
+    if (c.includes("/")) {
+      const parts = c.split("/");
+      let val = row;
+      for (const p of parts) {
+        val = val?.[p];
+        if (val === undefined) break;
+      }
+      if (val !== undefined) return val;
+    }
+    if (row[c] !== undefined && row[c] !== null && row[c] !== "") return row[c];
+  }
+  return null;
+};
+
+const mapRow = (row, colMap) => ({
+  url: resolveCol(row, colMap.url) || "",
+  date: resolveCol(row, colMap.date) || "",
+  caption: resolveCol(row, colMap.caption) || "",
+  likes: Number(resolveCol(row, colMap.likes)) || 0,
+  comments: Number(resolveCol(row, colMap.comments)) || 0,
+  views: Number(resolveCol(row, colMap.views)) || 0,
+  shares: Number(resolveCol(row, colMap.shares)) || 0,
+  saves: Number(resolveCol(row, colMap.saves)) || 0,
+  owner: resolveCol(row, colMap.owner) || "Inconnu",
+  followers: Number(resolveCol(row, colMap.followers)) || 0,
+  type: resolveCol(row, colMap.type) || "",
+  music: resolveCol(row, colMap.music) || "",
+  hashtags: resolveCol(row, colMap.hashtags) || "",
+  sponsored: resolveCol(row, colMap.sponsored),
+  duration: Number(resolveCol(row, colMap.duration)) || 0,
+  er: Number(resolveCol(row, colMap.er)) || 0,
+});
+
+/* ──────────────────────────────────────────────
+   SUSPECT / SPONSO DETECTION
+   ────────────────────────────────────────────── */
+const SUSPECT_KEYWORDS = [
+  "pub", "partenariat", "collaboration", "sponsor", "sponsorisé",
+  "gifted", "offert", "collab", "promo", "ambassador", "ambassadeur",
+  "ambassadrice", "#ad", "#pub", "#sponsorisé", "#partenariat",
+  "lien en bio", "code promo", "link in bio", "discount code",
+  "affiliated", "affilié",
+];
+
+const isSuspectSponso = (row) => {
+  const txt = (row.caption || "").toLowerCase();
+  return SUSPECT_KEYWORDS.some((kw) => txt.includes(kw.toLowerCase()));
+};
+
+const isConfirmedSponso = (row) => {
+  const v = row.sponsored;
+  return v === true || v === "true" || v === 1 || v === "1" || v === "yes";
+};
+
+/* ──────────────────────────────────────────────
+   HOT/COLD CLASSIFICATION
+   ────────────────────────────────────────────── */
+const isHot = (row) => MANUAL_EXCLUDE.includes(row.url);
+const isCold = (row) => !isHot(row);
+
+/* ──────────────────────────────────────────────
+   VIRAL THRESHOLD
+   ────────────────────────────────────────────── */
+const VIRAL_THRESHOLD = 2;
+
+const isViral = (row) => {
+  if (!row.followers || row.followers === 0) return row.views > 100000;
+  const ratio = row.views / row.followers;
+  return ratio >= VIRAL_THRESHOLD;
+};
+
+/* ──────────────────────────────────────────────
+   STYLES
+   ────────────────────────────────────────────── */
+const COLORS = {
+  bg: "#0f1117",
+  card: "#1a1d27",
+  cardHover: "#22263a",
+  border: "#2a2e3f",
+  accent: "#6c5ce7",
+  accentLight: "#a29bfe",
+  text: "#e2e8f0",
+  textDim: "#94a3b8",
+  textMuted: "#64748b",
+  green: "#00b894",
+  red: "#e17055",
+  orange: "#fdcb6e",
+  blue: "#74b9ff",
+  pink: "#fd79a8",
+  white: "#ffffff",
+};
+
+const S = {
+  page: {
+    minHeight: "100vh",
+    background: `linear-gradient(135deg, ${COLORS.bg} 0%, #1a1025 50%, ${COLORS.bg} 100%)`,
+    color: COLORS.text,
+    fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
+    padding: "0",
+  },
+  container: {
+    maxWidth: 1400,
+    margin: "0 auto",
+    padding: "24px 20px",
+  },
+  header: {
+    textAlign: "center",
+    marginBottom: 32,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: 800,
+    background: `linear-gradient(135deg, ${COLORS.accentLight}, ${COLORS.pink})`,
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: COLORS.textDim,
+  },
+  dropzone: {
+    border: `2px dashed ${COLORS.border}`,
+    borderRadius: 16,
+    padding: "48px 24px",
+    textAlign: "center",
+    cursor: "pointer",
+    transition: "all 0.3s ease",
+    background: COLORS.card,
+    marginBottom: 24,
+  },
+  dropzoneActive: {
+    borderColor: COLORS.accent,
+    background: "rgba(108, 92, 231, 0.1)",
+  },
+  tabs: {
+    display: "flex",
+    gap: 4,
+    marginBottom: 24,
+    background: COLORS.card,
+    borderRadius: 12,
+    padding: 4,
+    flexWrap: "wrap",
+  },
+  tab: {
+    padding: "10px 18px",
+    borderRadius: 8,
+    border: "none",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 600,
+    transition: "all 0.2s ease",
+    background: "transparent",
+    color: COLORS.textDim,
+    whiteSpace: "nowrap",
+  },
+  tabActive: {
+    background: COLORS.accent,
+    color: COLORS.white,
+  },
+  table: {
+    width: "100%",
+    borderCollapse: "separate",
+    borderSpacing: 0,
+    fontSize: 13,
+  },
+  th: {
+    padding: "12px 14px",
+    textAlign: "left",
+    fontWeight: 700,
+    color: COLORS.textDim,
+    borderBottom: `2px solid ${COLORS.border}`,
+    position: "sticky",
+    top: 0,
+    background: COLORS.card,
+    zIndex: 1,
+    whiteSpace: "nowrap",
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+  },
+  td: {
+    padding: "10px 14px",
+    borderBottom: `1px solid ${COLORS.border}`,
+    verticalAlign: "middle",
+    maxWidth: 260,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  tr: {
+    transition: "background 0.15s ease",
+  },
+  btn: {
+    padding: "10px 20px",
+    borderRadius: 8,
+    border: "none",
+    cursor: "pointer",
+    fontWeight: 600,
+    fontSize: 13,
+    transition: "all 0.2s ease",
+  },
+  btnPrimary: {
+    background: COLORS.accent,
+    color: COLORS.white,
+  },
+  btnSmall: {
+    padding: "4px 10px",
+    fontSize: 12,
+    borderRadius: 6,
+    border: "none",
+    cursor: "pointer",
+    fontWeight: 600,
+  },
+  kpiGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+    gap: 16,
+    marginBottom: 24,
+  },
+  kpiCard: {
+    background: COLORS.card,
+    borderRadius: 12,
+    padding: "18px 20px",
+    border: `1px solid ${COLORS.border}`,
+  },
+  kpiLabel: {
+    fontSize: 11,
+    color: COLORS.textDim,
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    marginBottom: 4,
+  },
+  kpiValue: {
+    fontSize: 24,
+    fontWeight: 800,
+  },
+  badge: {
+    display: "inline-block",
+    padding: "2px 8px",
+    borderRadius: 4,
+    fontSize: 11,
+    fontWeight: 700,
+  },
+  filterBar: {
+    display: "flex",
+    gap: 8,
+    marginBottom: 16,
+    flexWrap: "wrap",
+    alignItems: "center",
+  },
+  select: {
+    padding: "8px 12px",
+    borderRadius: 8,
+    border: `1px solid ${COLORS.border}`,
+    background: COLORS.card,
+    color: COLORS.text,
+    fontSize: 13,
+  },
+  footer: {
+    textAlign: "center",
+    padding: "24px 0 12px",
+    color: COLORS.textMuted,
+    fontSize: 12,
+    borderTop: `1px solid ${COLORS.border}`,
+    marginTop: 40,
+  },
+  tableWrap: {
+    overflowX: "auto",
+    background: COLORS.card,
+    borderRadius: 12,
+    border: `1px solid ${COLORS.border}`,
+  },
+  platformBadge: {
+    display: "inline-block",
+    padding: "2px 8px",
+    borderRadius: 4,
+    fontSize: 11,
+    fontWeight: 700,
+    marginLeft: 8,
+  },
+};
+
+/* ──────────────────────────────────────────────
+   EXPORT EXCEL
+   ────────────────────────────────────────────── */
+const exportExcel = (data, platform, tab) => {
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
-  XLSX.writeFile(wb, fileName);
-}
 
-function SortTable({ data, columns, gridCols, exportData, exportHeaders, exportName, searchPlaceholder }) {
-  const [sc, setSc] = useState(null);
-  const [sa, setSa] = useState(false);
-  const [q, setQ] = useState("");
-  const doSort = k => { if (sc === k) setSa(!sa); else { setSc(k); setSa(false); } };
-  let list = [...data];
-  if (q) { const s = q.toLowerCase(); list = list.filter(r => columns.some(c => String(r[c.key] || "").toLowerCase().includes(s))); }
-  if (sc) { list.sort((a, b) => { let va = a[sc] ?? -Infinity, vb = b[sc] ?? -Infinity; const na = Number(va), nb = Number(vb); if (!isNaN(na) && !isNaN(nb)) return sa ? na - nb : nb - na; return sa ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va)); }); }
-  const handleExport = () => { if (!exportData) return; exportXLSX(exportData(list), exportHeaders, exportName || "Export", (exportName || "export") + ".xlsx"); };
-  return (<>
-    <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
-      <input value={q} onChange={e => setQ(e.target.value)} placeholder={searchPlaceholder || "\ud83d\udd0d Rechercher..."} style={{ flex: 1, padding: 7, borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "#fff", fontSize: 13, outline: "none" }} />
-      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>{list.length} r\u00e9sultats</span>
-      {exportData && <button onClick={handleExport} style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid rgba(34,197,94,0.4)", background: "rgba(34,197,94,0.1)", color: "#4ade80", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{"\ud83d\udce5"} Export Excel</button>}
-    </div>
-    <div style={{ borderRadius: 10, border: "1px solid rgba(255,255,255,0.1)", overflow: "hidden" }}>
-      <div style={{ display: "grid", gridTemplateColumns: gridCols, background: "rgba(255,255,255,0.07)", padding: "8px 10px", gap: 4 }}>
-        {columns.map(c => (<div key={c.key} onClick={() => doSort(c.key)} style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", cursor: "pointer", userSelect: "none" }}>{c.label}{sc === c.key ? (sa ? " \u2191" : " \u2193") : ""}</div>))}
-      </div>
-      <div style={{ maxHeight: 460, overflowY: "auto" }}>
-        {list.map((r, i) => (<div key={i} style={{ display: "grid", gridTemplateColumns: gridCols, padding: "7px 10px", gap: 4, borderTop: "1px solid rgba(255,255,255,0.04)", background: i % 2 ? "rgba(255,255,255,0.02)" : "transparent", alignItems: "center" }}>
-          {columns.map(c => (<div key={c.key} style={{ fontSize: 12, fontWeight: c.bold ? 600 : 400, color: c.color || "rgba(255,255,255,0.7)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={c.title ? String(r[c.key] || "") : undefined}>{c.render ? c.render(r) : (c.fmt ? fmt(r[c.key]) : r[c.key])}</div>))}
-        </div>))}
-      </div>
-    </div>
-  </>);
-}
+  const makeSheet = (rows, name) => {
+    const ws = XLSX.utils.json_to_sheet(
+      rows.map((r) => ({
+        URL: r.url,
+        Date: fmtDate(r.date),
+        Semaine: getWeekLabel(r.date),
+        Compte: r.owner,
+        Caption: r.caption,
+        Vues: r.views,
+        Likes: r.likes,
+        Commentaires: r.comments,
+        Partages: r.shares,
+        Saves: r.saves,
+        Followers: r.followers,
+        "Ratio V/F": r.followers ? (r.views / r.followers).toFixed(2) : "—",
+        "Chaud/Froid": isHot(r) ? "Chaud" : "Froid",
+      }))
+    );
+    XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
+  };
 
-const linkCol = { key: "url", label: "\ud83d\udd17", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "#6366f1" }}>{"\ud83d\udd17"}</a> : "\u2014" };
-const platCol = { key: "platform", label: "Plat.", render: r => <span title={r.platform}>{platformIcon(r.platform)}</span> };
-const KPI = ({ items }) => <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8, marginBottom: 12 }}>{items.map(([l,v,c]) => <div key={l} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "10px 12px" }}><div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>{l}</div><div style={{ fontSize: 18, fontWeight: 700, color: c }}>{v}</div></div>)}</div>;
+  if (tab === "all") {
+    makeSheet(data, "Contenus");
+    const viraux = data.filter(isViral);
+    makeSheet(viraux.filter(isCold), "Viraux Froid");
+    makeSheet(viraux.filter(isHot), "Viraux Chaud");
+    makeSheet(data.filter(isSuspectSponso), "Suspects");
+    makeSheet(data.filter(isConfirmedSponso), "Sponsos");
+  } else {
+    makeSheet(data, tab);
+  }
 
-const expContenus = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", r.shares ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
-const expMarques = rows => rows.map(b => [b.compte, b.nbVideos, Math.round(b.avgViews), (b.avgEngagement*100).toFixed(2)+"%", b.nbViral]);
-const expViraux = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), cleanCap(r.caption), r.views ?? "", r.avgCompte ?? "", r.ratio ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.tempType || "", r.url]; });
-const expSuspects = rows => rows.map(r => [r.platform, r.compte, fmtDate(r.date), cleanCap(r.caption), r.views ?? "", r.ratioVues ?? "", (r.eng*100).toFixed(2)+"%", (r.avgEngCompte*100).toFixed(2)+"%", r.url]);
-const expSponso = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
+  XLSX.writeFile(wb, `dashboard_${platform}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+};
 
-const hContenus = ["Plateforme","Compte","Date","Type","Caption","Vues","Likes","Com.","Partages","Engagement","URL"];
-const hMarques = ["Compte","Vid\u00e9os","Moy. vues","Engagement","Virales"];
-const hViraux = ["Plateforme","Compte","Date","Caption","Vues","Moy.","Ratio","Engagement","Type","URL"];
-const hSuspects = ["Plateforme","Compte","Date","Caption","Vues","Ratio","Engagement","Moy. eng.","URL"];
-const hSponso = ["Plateforme","Compte","Date","Type","Caption","Vues","Likes","Com.","Engagement","URL"];
-
+/* ──────────────────────────────────────────────
+   MAIN COMPONENT
+   ────────────────────────────────────────────── */
 export default function Dashboard() {
-  const [rows, setRows] = useState([]);
-  const [drag, setDrag] = useState(false);
-  const [files, setFiles] = useState([]);
-  const [page, setPage] = useState("contenus");
-  const [manualExclude, setManualExclude] = useState(MANUAL_EXCLUDE);
+  const [data, setData] = useState([]);
+  const [platform, setPlatform] = useState(null);
+  const [activeTab, setActiveTab] = useState("contenus");
+  const [dragOver, setDragOver] = useState(false);
+  const [sortCol, setSortCol] = useState("views");
+  const [sortDir, setSortDir] = useState("desc");
   const [viralFilter, setViralFilter] = useState("froid");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [localExclude, setLocalExclude] = useState([]);
 
-  const loadFile = useCallback((f) => {
-    Papa.parse(f, { header: true, dynamicTyping: true, skipEmptyLines: true, complete: (r) => {
-      const mapped = r.data.map(mapRow).filter(x => x.date || x.caption !== "\u2014");
-      setRows(prev => [...prev, ...mapped]);
-      setFiles(prev => [...prev, f.name]);
-    }});
+  /* Combined exclude list (MANUAL_EXCLUDE + session removals) */
+  const allExclude = useMemo(
+    () => new Set([...MANUAL_EXCLUDE, ...localExclude]),
+    [localExclude]
+  );
+
+  const isHotLive = useCallback(
+    (row) => allExclude.has(row.url),
+    [allExclude]
+  );
+  const isColdLive = useCallback(
+    (row) => !allExclude.has(row.url),
+    [allExclude]
+  );
+
+  /* Parse CSV */
+  const handleFile = useCallback((file) => {
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      dynamicTyping: true,
+      complete: (results) => {
+        const headers = results.meta.fields || [];
+        const detected = detectPlatform(headers);
+        setPlatform(detected);
+        const colMap = COLUMN_MAPS[detected];
+        const mapped = results.data
+          .map((row) => mapRow(row, colMap))
+          .filter((r) => r.url);
+        setData(mapped);
+        setActiveTab("contenus");
+      },
+    });
   }, []);
 
-  const handleDrop = useCallback((e) => {
-    e.preventDefault(); setDrag(false);
-    const fileList = e.dataTransfer?.files;
-    if (fileList) Array.from(fileList).forEach(f => loadFile(f));
-  }, [loadFile]);
+  const onDrop = useCallback(
+    (e) => {
+      e.preventDefault();
+      setDragOver(false);
+      const f = e.dataTransfer?.files?.[0] || e.target?.files?.[0];
+      if (f) handleFile(f);
+    },
+    [handleFile]
+  );
 
-  const handleFileInput = useCallback((e) => {
-    const fileList = e.target.files;
-    if (fileList) Array.from(fileList).forEach(f => loadFile(f));
-  }, [loadFile]);
+  /* Sort */
+  const doSort = (col) => {
+    if (sortCol === col) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    else {
+      setSortCol(col);
+      setSortDir("desc");
+    }
+  };
 
-  const platformCounts = useMemo(() => {
-    return { instagram: rows.filter(r => r.platform === "instagram").length, tiktok: rows.filter(r => r.platform === "tiktok").length };
-  }, [rows]);
+  const sortData = useCallback(
+    (arr) =>
+      _.orderBy(arr, [(r) => (typeof r[sortCol] === "number" ? r[sortCol] : 0)], [sortDir]),
+    [sortCol, sortDir]
+  );
 
-  const { brands, viralRows, suspectRows } = useMemo(() => {
-    const videos = rows.filter(r => isVideo(r.type) || r.platform === "tiktok");
-    const grouped = _.groupBy(videos, "compte");
-    const brandsArr = Object.entries(grouped).filter(([c, vids]) => vids.length >= 3).map(([compte, vids]) => {
-      const vl = vids.map(v => Number(v.views) || 0);
-      const avg = vl.length ? _.mean(vl) : 0;
-      const thr = avg * 2.5;
-      const nv = vl.filter(v => v >= thr).length;
-      const engs = vids.map(v => calcEng(v));
-      const ae = engs.length ? _.mean(engs) : 0;
-      const platforms = _.uniq(vids.map(v => v.platform));
-      return { compte, nbVideos: vids.length, avgViews: avg, nbViral: nv, avgEngagement: ae, vids, platforms };
-    });
-    const viral = [];
-    brandsArr.forEach(b => { const thr = b.avgViews * 2.5; b.vids.forEach(v => { const views = Number(v.views) || 0; if (views >= thr) viral.push({ ...v, avgCompte: Math.round(b.avgViews), ratio: b.avgViews > 0 ? (views / b.avgViews).toFixed(1) : "\u2014" }); }); });
-    const suspect = [];
-    brandsArr.forEach(b => { if (b.nbVideos < 3) return; const thr = b.avgViews * 1.5; b.vids.forEach(v => { const vw = Number(v.views) || 0; const eng = calcEng(v); if (vw >= thr && eng < 0.01) suspect.push({ ...v, avgCompte: Math.round(b.avgViews), avgEngCompte: b.avgEngagement, eng, ratioVues: b.avgViews > 0 ? (vw / b.avgViews).toFixed(1) : "\u2014" }); }); });
-    return { brands: brandsArr, viralRows: viral, suspectRows: suspect };
-  }, [rows]);
+  const filterSearch = useCallback(
+    (arr) => {
+      if (!searchTerm) return arr;
+      const q = searchTerm.toLowerCase();
+      return arr.filter(
+        (r) =>
+          (r.caption || "").toLowerCase().includes(q) ||
+          (r.owner || "").toLowerCase().includes(q) ||
+          (r.url || "").toLowerCase().includes(q)
+      );
+    },
+    [searchTerm]
+  );
 
-  const viralWithType = useMemo(() => {
-    return viralRows.map(r => {
-      const url = (r.url || "").replace(/\/$/, "");
-      if (manualExclude.some(u => u.replace(/\/$/, "") === url)) return { ...r, tempType: "chaud" };
-      return { ...r, tempType: "froid" };
-    });
-  }, [viralRows, manualExclude]);
+  /* Tab data */
+  const contenus = useMemo(() => sortData(filterSearch(data)), [data, sortData, filterSearch]);
+  const viraux = useMemo(() => {
+    const v = data.filter(isViral);
+    if (viralFilter === "froid") return sortData(filterSearch(v.filter(isColdLive)));
+    if (viralFilter === "chaud") return sortData(filterSearch(v.filter(isHotLive)));
+    return sortData(filterSearch(v));
+  }, [data, sortData, filterSearch, viralFilter, isColdLive, isHotLive]);
 
-  const filteredViral = useMemo(() => {
-    if (viralFilter === "all") return viralWithType;
-    if (viralFilter === "froid") return viralWithType.filter(r => r.tempType === "froid");
-    if (viralFilter === "chaud") return viralWithType.filter(r => r.tempType === "chaud");
-    return viralWithType;
-  }, [viralWithType, viralFilter]);
+  const suspects = useMemo(() => sortData(filterSearch(data.filter(isSuspectSponso))), [data, sortData, filterSearch]);
+  const sponsos = useMemo(() => sortData(filterSearch(data.filter(isConfirmedSponso))), [data, sortData, filterSearch]);
 
-  const nbFroid = viralWithType.filter(r => r.tempType === "froid").length;
-  const nbChaud = viralWithType.filter(r => r.tempType === "chaud").length;
-  const handleManualExclude = (url) => setManualExclude(prev => [...prev, url]);
-  const handleManualInclude = (url) => setManualExclude(prev => prev.filter(u => u.replace(/\/$/, "") !== url.replace(/\/$/, "")));
+  /* ── MARQUES TAB DATA ── */
+  const marquesData = useMemo(() => {
+    const groups = _.groupBy(data, "owner");
+    /* Distinct weeks in dataset */
+    const allWeeks = new Set(data.map((r) => getWeekLabel(r.date)).filter(Boolean));
+    const nbWeeks = Math.max(allWeeks.size, 1);
 
-  const sponsoRows = useMemo(() => {
-    const kw = ["partenariat r\u00e9mun\u00e9r\u00e9", "partenariat remunere", "collaboration commerciale", "partenariat"];
-    return rows.filter(r => { const c = (r.caption || "").toLowerCase(); const hasKw = kw.some(k => c.includes(k)); const hasPaid = !!r.isPaid; return hasKw || hasPaid; });
-  }, [rows]);
+    return Object.entries(groups)
+      .map(([owner, rows]) => {
+        const totalViews = _.sumBy(rows, "views");
+        const totalLikes = _.sumBy(rows, "likes");
+        const totalComments = _.sumBy(rows, "comments");
+        const totalShares = _.sumBy(rows, "shares");
+        const totalSaves = _.sumBy(rows, "saves");
+        const avgFollowers = Math.round(_.meanBy(rows, "followers"));
+        const nbVideos = rows.length;
+        const nbVirales = rows.filter(isViral).length;
+        const nbHot = rows.filter(isHotLive).length;
+        const nbCold = rows.filter(isColdLive).length;
+        const avgViewsPerVideo = Math.round(totalViews / nbVideos);
+        const avgVideosPerWeek = (nbVideos / nbWeeks).toFixed(1);
 
-  const tot = k => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
-  const TABS = [["contenus","\ud83d\udcdd Contenus"],["marques","\ud83c\udfe2 Marques"],["viraux","\ud83d\udd25 Viraux"],["suspects","\ud83e\udd14 Suspects"],["sponso","\ud83e\udd1d Sponsos"]];
-  const badge = (k) => { const map = { viraux: [nbFroid + "/" + viralRows.length,"#fbbf24"], suspects: [suspectRows.length,"#f472b6"], sponso: [sponsoRows.length,"#34d399"] }; const m = map[k]; if (!m) return null; return <span style={{ marginLeft: 6, padding: "2px 7px", borderRadius: 10, background: m[1]+"33", color: m[1], fontSize: 11 }}>{m[0]}</span>; };
+        /* ER moyen */
+        const avgER =
+          avgFollowers > 0
+            ? (((totalLikes + totalComments) / nbVideos / avgFollowers) * 100).toFixed(2)
+            : 0;
 
-  // UPLOAD SCREEN
-  if (!rows.length) return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg,#0f0f23,#1a1a3e)", fontFamily: "system-ui", padding: 20 }}>
-      <div onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={handleDrop} onClick={() => document.getElementById("up").click()}
-        style={{ border: drag ? "2px dashed #6366f1" : "2px dashed rgba(255,255,255,0.15)", background: drag ? "rgba(99,102,241,0.1)" : "rgba(255,255,255,0.04)", borderRadius: 20, padding: "56px 40px", maxWidth: 520, width: "100%", textAlign: "center", cursor: "pointer" }}>
-        <div style={{ fontSize: 52, marginBottom: 14 }}>{"\ud83d\udcc2"}</div>
-        <h1 style={{ color: "#fff", fontSize: 20, margin: "0 0 8px" }}>Importe tes fichiers</h1>
-        <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 13, margin: "0 0 22px", lineHeight: 1.5 }}>Glisse tes CSV ici (Instagram + TikTok)<br/>Tu peux en importer plusieurs d'un coup</p>
-        <div style={{ display: "flex", gap: 12, justifyContent: "center", marginBottom: 16 }}>
-          <span style={{ padding: "6px 14px", borderRadius: 8, background: "rgba(225,48,108,0.15)", color: "#E1306C", fontSize: 13 }}>{"\ud83d\udcf8"} Instagram</span>
-          <span style={{ padding: "6px 14px", borderRadius: 8, background: "rgba(0,0,0,0.3)", color: "#fff", fontSize: 13 }}>{"\ud83c\udfb5"} TikTok</span>
-        </div>
-        <div style={{ display: "inline-block", padding: "10px 24px", borderRadius: 10, background: "#6366f1", color: "#fff", fontSize: 14, fontWeight: 600 }}>{"\ud83d\udce5"} Choisir des fichiers</div>
-        <input id="up" type="file" accept=".csv" multiple onChange={handleFileInput} style={{ display: "none" }} />
-      </div>
+        return {
+          owner,
+          nbVideos,
+          totalViews,
+          totalLikes,
+          totalComments,
+          totalShares,
+          totalSaves,
+          avgFollowers,
+          avgViewsPerVideo,
+          avgER,
+          nbVirales,
+          nbHot,
+          nbCold,
+          avgVideosPerWeek,
+        };
+      })
+      .filter((m) => m.nbVideos >= 3)
+      .sort((a, b) => b.totalViews - a.totalViews);
+  }, [data, isHotLive, isColdLive]);
+
+  /* ── TOGGLE HOT/COLD in session ── */
+  const toggleHot = (url) => {
+    setLocalExclude((prev) =>
+      prev.includes(url) ? prev.filter((u) => u !== url) : [...prev, url]
+    );
+  };
+
+  /* ── RENDER HELPERS ── */
+  const SortHeader = ({ col, label }) => (
+    <th
+      style={{ ...S.th, cursor: "pointer", userSelect: "none" }}
+      onClick={() => doSort(col)}
+    >
+      {label} {sortCol === col ? (sortDir === "desc" ? "▼" : "▲") : ""}
+    </th>
+  );
+
+  const KPI = ({ label, value, color }) => (
+    <div style={S.kpiCard}>
+      <div style={S.kpiLabel}>{label}</div>
+      <div style={{ ...S.kpiValue, color: color || COLORS.accentLight }}>{value}</div>
     </div>
   );
 
-  // MAIN
-  return (
-    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#0f0f23,#1a1a3e)", fontFamily: "system-ui", color: "#fff", padding: "20px 16px" }}>
-      <div style={{ maxWidth: 1150, margin: "0 auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-          <div>
-            <h1 style={{ fontSize: 18, margin: 0 }}>{"\ud83d\udcca"} Social Media Dashboard</h1>
-            <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, margin: 0 }}>
-              {files.map((f, i) => <span key={i}>{"\ud83d\udcc4"} {f}{i < files.length - 1 ? " \u00b7 " : ""}</span>)}
-              {" \u2014 "}{rows.length} posts \u00b7 {brands.length} comptes
-              {platformCounts.instagram > 0 && <span style={{ marginLeft: 8, padding: "1px 6px", borderRadius: 6, background: "rgba(225,48,108,0.15)", color: "#E1306C", fontSize: 11 }}>{"\ud83d\udcf8"} {platformCounts.instagram}</span>}
-              {platformCounts.tiktok > 0 && <span style={{ marginLeft: 4, padding: "1px 6px", borderRadius: 6, background: "rgba(255,255,255,0.1)", color: "#fff", fontSize: 11 }}>{"\ud83c\udfb5"} {platformCounts.tiktok}</span>}
-            </p>
+  /* ── UPLOAD SCREEN ── */
+  if (data.length === 0) {
+    return (
+      <div style={S.page}>
+        <div style={S.container}>
+          <div style={S.header}>
+            <div style={S.title}>Social Media Dashboard</div>
+            <div style={S.subtitle}>Instagram & TikTok — Analyse de contenus</div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => document.getElementById("up2").click()} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(99,102,241,0.4)", background: "rgba(99,102,241,0.1)", color: "#818cf8", fontSize: 12, cursor: "pointer" }}>{"\u2795"} Ajouter CSV</button>
-            <input id="up2" type="file" accept=".csv" multiple onChange={handleFileInput} style={{ display: "none" }} />
-            <button onClick={() => { setRows([]); setFiles([]); }} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)", fontSize: 12, cursor: "pointer" }}>{"\ud83d\udd04"} Reset</button>
+          <div
+            style={{ ...S.dropzone, ...(dragOver ? S.dropzoneActive : {}) }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+            onClick={() => document.getElementById("csv-input").click()}
+          >
+            <div style={{ fontSize: 48, marginBottom: 16 }}>📂</div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+              Importe ton fichier Apify
+            </div>
+            <div style={{ color: COLORS.textDim, fontSize: 14 }}>
+              Glisse ton CSV ici ou clique pour parcourir
+            </div>
+            <div style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 8 }}>
+              Détection automatique Instagram / TikTok
+            </div>
+            <input
+              id="csv-input"
+              type="file"
+              accept=".csv"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                if (e.target.files[0]) handleFile(e.target.files[0]);
+              }}
+            />
+          </div>
+          <div style={S.footer}>© 2026 Clément Dubois — Tous droits réservés</div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── KPI SUMMARY ── */
+  const totalViews = _.sumBy(data, "views");
+  const totalLikes = _.sumBy(data, "likes");
+  const totalViraux = data.filter(isViral).length;
+  const nbBrands = new Set(data.map((r) => r.owner)).size;
+
+  const TABS = [
+    { id: "contenus", label: "📋 Contenus", count: data.length },
+    { id: "marques", label: "🏷️ Marques", count: marquesData.length },
+    { id: "viraux", label: "🔥 Viraux", count: totalViraux },
+    { id: "suspects", label: "🔍 Suspects", count: suspects.length },
+    { id: "sponsos", label: "💰 Sponsos", count: sponsos.length },
+  ];
+
+  /* ── CONTENUS TABLE ── */
+  const renderContenus = () => (
+    <>
+      <div style={S.kpiGrid}>
+        <KPI label="Total vidéos" value={fmt(data.length)} color={COLORS.blue} />
+        <KPI label="Total vues" value={fmt(totalViews)} color={COLORS.green} />
+        <KPI label="Total likes" value={fmt(totalLikes)} color={COLORS.pink} />
+        <KPI label="Viraux" value={fmt(totalViraux)} color={COLORS.orange} />
+        <KPI label="Marques" value={fmt(nbBrands)} color={COLORS.accentLight} />
+      </div>
+      <div style={S.tableWrap}>
+        <table style={S.table}>
+          <thead>
+            <tr>
+              <th style={S.th}>#</th>
+              <th style={S.th}>Date</th>
+              <th style={S.th}>Semaine</th>
+              <th style={S.th}>Compte</th>
+              <SortHeader col="views" label="Vues" />
+              <SortHeader col="likes" label="Likes" />
+              <SortHeader col="comments" label="Com." />
+              <SortHeader col="shares" label="Part." />
+              <SortHeader col="saves" label="Saves" />
+              <th style={S.th}>Ratio V/F</th>
+              <th style={S.th}>Caption</th>
+            </tr>
+          </thead>
+          <tbody>
+            {contenus.map((r, i) => (
+              <tr
+                key={r.url + i}
+                style={{
+                  ...S.tr,
+                  background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = COLORS.cardHover)}
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.background =
+                    i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)")
+                }
+              >
+                <td style={{ ...S.td, color: COLORS.textMuted }}>{i + 1}</td>
+                <td style={S.td}>{fmtDate(r.date)}</td>
+                <td style={S.td}>
+                  <span
+                    style={{
+                      ...S.badge,
+                      background: "rgba(108,92,231,0.15)",
+                      color: COLORS.accentLight,
+                    }}
+                  >
+                    {getWeekLabel(r.date)}
+                  </span>
+                  <span
+                    style={{ fontSize: 10, color: COLORS.textMuted, marginLeft: 4 }}
+                  >
+                    {getWeekRange(r.date)}
+                  </span>
+                </td>
+                <td style={{ ...S.td, fontWeight: 600 }}>
+                  <a
+                    href={r.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: COLORS.accentLight, textDecoration: "none" }}
+                  >
+                    {r.owner}
+                  </a>
+                </td>
+                <td style={{ ...S.td, fontWeight: 700 }}>{fmt(r.views)}</td>
+                <td style={S.td}>{fmt(r.likes)}</td>
+                <td style={S.td}>{fmt(r.comments)}</td>
+                <td style={S.td}>{fmt(r.shares)}</td>
+                <td style={S.td}>{fmt(r.saves)}</td>
+                <td style={S.td}>
+                  <span
+                    style={{
+                      ...S.badge,
+                      background:
+                        r.followers && r.views / r.followers >= VIRAL_THRESHOLD
+                          ? "rgba(0,184,148,0.15)"
+                          : "transparent",
+                      color:
+                        r.followers && r.views / r.followers >= VIRAL_THRESHOLD
+                          ? COLORS.green
+                          : COLORS.textDim,
+                    }}
+                  >
+                    {r.followers ? (r.views / r.followers).toFixed(2) : "—"}
+                  </span>
+                </td>
+                <td
+                  style={{ ...S.td, maxWidth: 200, color: COLORS.textDim, fontSize: 12 }}
+                  title={r.caption}
+                >
+                  {r.caption?.slice(0, 60)}
+                  {r.caption?.length > 60 ? "…" : ""}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+
+  /* ── MARQUES TABLE ── */
+  const renderMarques = () => (
+    <>
+      <div style={S.kpiGrid}>
+        <KPI label="Total marques (≥3 vidéos)" value={marquesData.length} color={COLORS.blue} />
+        <KPI
+          label="Moy. vidéos/semaine"
+          value={
+            marquesData.length
+              ? (marquesData.reduce((s, m) => s + parseFloat(m.avgVideosPerWeek), 0) / marquesData.length).toFixed(1)
+              : "—"
+          }
+          color={COLORS.green}
+        />
+        <KPI
+          label="Total vidéos actu chaude"
+          value={fmt(marquesData.reduce((s, m) => s + m.nbHot, 0))}
+          color={COLORS.red}
+        />
+        <KPI
+          label="Total vidéos froides"
+          value={fmt(marquesData.reduce((s, m) => s + m.nbCold, 0))}
+          color={COLORS.blue}
+        />
+      </div>
+      <div style={S.tableWrap}>
+        <table style={S.table}>
+          <thead>
+            <tr>
+              <th style={S.th}>#</th>
+              <th style={S.th}>Marque</th>
+              <th style={S.th}>Vidéos</th>
+              <th style={S.th}>Moy./sem</th>
+              <th style={S.th}>Vues totales</th>
+              <th style={S.th}>Moy. vues</th>
+              <th style={S.th}>Likes</th>
+              <th style={S.th}>Com.</th>
+              <th style={S.th}>Part.</th>
+              <th style={S.th}>Saves</th>
+              <th style={S.th}>Followers</th>
+              <th style={S.th}>ER moy.</th>
+              <th style={S.th}>Virales</th>
+              <th style={S.th}>🔥 Chaud</th>
+              <th style={S.th}>❄️ Froid</th>
+            </tr>
+          </thead>
+          <tbody>
+            {marquesData.map((m, i) => (
+              <tr
+                key={m.owner}
+                style={{
+                  ...S.tr,
+                  background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = COLORS.cardHover)}
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.background =
+                    i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)")
+                }
+              >
+                <td style={{ ...S.td, color: COLORS.textMuted }}>{i + 1}</td>
+                <td style={{ ...S.td, fontWeight: 700 }}>{m.owner}</td>
+                <td style={S.td}>{m.nbVideos}</td>
+                <td style={S.td}>
+                  <span
+                    style={{
+                      ...S.badge,
+                      background: "rgba(0,184,148,0.15)",
+                      color: COLORS.green,
+                    }}
+                  >
+                    {m.avgVideosPerWeek}
+                  </span>
+                </td>
+                <td style={{ ...S.td, fontWeight: 700 }}>{fmt(m.totalViews)}</td>
+                <td style={S.td}>{fmt(m.avgViewsPerVideo)}</td>
+                <td style={S.td}>{fmt(m.totalLikes)}</td>
+                <td style={S.td}>{fmt(m.totalComments)}</td>
+                <td style={S.td}>{fmt(m.totalShares)}</td>
+                <td style={S.td}>{fmt(m.totalSaves)}</td>
+                <td style={S.td}>{fmt(m.avgFollowers)}</td>
+                <td style={S.td}>{fmtPct(m.avgER)}</td>
+                <td style={S.td}>
+                  <span
+                    style={{
+                      ...S.badge,
+                      background: "rgba(253,203,110,0.15)",
+                      color: COLORS.orange,
+                    }}
+                  >
+                    {m.nbVirales}
+                  </span>
+                </td>
+                <td style={S.td}>
+                  <span
+                    style={{
+                      ...S.badge,
+                      background: "rgba(225,112,85,0.15)",
+                      color: COLORS.red,
+                    }}
+                  >
+                    {m.nbHot}
+                  </span>
+                </td>
+                <td style={S.td}>
+                  <span
+                    style={{
+                      ...S.badge,
+                      background: "rgba(116,185,255,0.15)",
+                      color: COLORS.blue,
+                    }}
+                  >
+                    {m.nbCold}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+
+  /* ── VIRAUX TABLE ── */
+  const renderViraux = () => (
+    <>
+      <div style={S.filterBar}>
+        <span style={{ fontWeight: 700, fontSize: 13, color: COLORS.textDim }}>Filtre :</span>
+        {["froid", "chaud", "tous"].map((f) => (
+          <button
+            key={f}
+            style={{
+              ...S.btnSmall,
+              background: viralFilter === f ? COLORS.accent : COLORS.card,
+              color: viralFilter === f ? COLORS.white : COLORS.textDim,
+              border: `1px solid ${COLORS.border}`,
+            }}
+            onClick={() => setViralFilter(f)}
+          >
+            {f === "froid" ? "❄️ Froid" : f === "chaud" ? "🔥 Chaud" : "📊 Tous"}
+          </button>
+        ))}
+        <span style={{ fontSize: 12, color: COLORS.textMuted, marginLeft: 8 }}>
+          {viraux.length} vidéos
+        </span>
+      </div>
+      <div style={S.tableWrap}>
+        <table style={S.table}>
+          <thead>
+            <tr>
+              <th style={S.th}>#</th>
+              <th style={S.th}>Date</th>
+              <th style={S.th}>Semaine</th>
+              <th style={S.th}>Compte</th>
+              <SortHeader col="views" label="Vues" />
+              <SortHeader col="likes" label="Likes" />
+              <SortHeader col="comments" label="Com." />
+              <th style={S.th}>Ratio V/F</th>
+              <th style={S.th}>Type</th>
+              <th style={S.th}>Caption</th>
+              <th style={S.th}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {viraux.map((r, i) => {
+              const hot = isHotLive(r);
+              return (
+                <tr
+                  key={r.url + i}
+                  style={{
+                    ...S.tr,
+                    background: hot
+                      ? "rgba(225,112,85,0.06)"
+                      : i % 2 === 0
+                      ? "transparent"
+                      : "rgba(255,255,255,0.02)",
+                  }}
+                >
+                  <td style={{ ...S.td, color: COLORS.textMuted }}>{i + 1}</td>
+                  <td style={S.td}>{fmtDate(r.date)}</td>
+                  <td style={S.td}>
+                    <span
+                      style={{
+                        ...S.badge,
+                        background: "rgba(108,92,231,0.15)",
+                        color: COLORS.accentLight,
+                      }}
+                    >
+                      {getWeekLabel(r.date)}
+                    </span>
+                  </td>
+                  <td style={{ ...S.td, fontWeight: 600 }}>
+                    <a
+                      href={r.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: COLORS.accentLight, textDecoration: "none" }}
+                    >
+                      {r.owner}
+                    </a>
+                  </td>
+                  <td style={{ ...S.td, fontWeight: 700 }}>{fmt(r.views)}</td>
+                  <td style={S.td}>{fmt(r.likes)}</td>
+                  <td style={S.td}>{fmt(r.comments)}</td>
+                  <td style={S.td}>
+                    <span style={{ ...S.badge, background: "rgba(0,184,148,0.15)", color: COLORS.green }}>
+                      {r.followers ? (r.views / r.followers).toFixed(2) : "—"}
+                    </span>
+                  </td>
+                  <td style={S.td}>
+                    <span
+                      style={{
+                        ...S.badge,
+                        background: hot ? "rgba(225,112,85,0.15)" : "rgba(116,185,255,0.15)",
+                        color: hot ? COLORS.red : COLORS.blue,
+                      }}
+                    >
+                      {hot ? "🔥 Chaud" : "❄️ Froid"}
+                    </span>
+                  </td>
+                  <td
+                    style={{ ...S.td, maxWidth: 180, color: COLORS.textDim, fontSize: 12 }}
+                    title={r.caption}
+                  >
+                    {r.caption?.slice(0, 50)}
+                    {r.caption?.length > 50 ? "…" : ""}
+                  </td>
+                  <td style={S.td}>
+                    <button
+                      style={{
+                        ...S.btnSmall,
+                        background: hot ? "rgba(0,184,148,0.15)" : "rgba(225,112,85,0.15)",
+                        color: hot ? COLORS.green : COLORS.red,
+                      }}
+                      title={hot ? "Remettre en froid" : "Marquer comme chaud"}
+                      onClick={() => toggleHot(r.url)}
+                    >
+                      {hot ? "↩️" : "✕"}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+
+  /* ── GENERIC TABLE (Suspects / Sponsos) ── */
+  const renderGenericTable = (rows, label) => (
+    <>
+      <div style={S.kpiGrid}>
+        <KPI label={`Total ${label}`} value={rows.length} color={COLORS.orange} />
+      </div>
+      <div style={S.tableWrap}>
+        <table style={S.table}>
+          <thead>
+            <tr>
+              <th style={S.th}>#</th>
+              <th style={S.th}>Date</th>
+              <th style={S.th}>Semaine</th>
+              <th style={S.th}>Compte</th>
+              <SortHeader col="views" label="Vues" />
+              <SortHeader col="likes" label="Likes" />
+              <th style={S.th}>Ratio V/F</th>
+              <th style={S.th}>Caption</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr
+                key={r.url + i}
+                style={{
+                  ...S.tr,
+                  background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = COLORS.cardHover)}
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.background =
+                    i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)")
+                }
+              >
+                <td style={{ ...S.td, color: COLORS.textMuted }}>{i + 1}</td>
+                <td style={S.td}>{fmtDate(r.date)}</td>
+                <td style={S.td}>
+                  <span
+                    style={{
+                      ...S.badge,
+                      background: "rgba(108,92,231,0.15)",
+                      color: COLORS.accentLight,
+                    }}
+                  >
+                    {getWeekLabel(r.date)}
+                  </span>
+                </td>
+                <td style={{ ...S.td, fontWeight: 600 }}>
+                  <a
+                    href={r.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: COLORS.accentLight, textDecoration: "none" }}
+                  >
+                    {r.owner}
+                  </a>
+                </td>
+                <td style={{ ...S.td, fontWeight: 700 }}>{fmt(r.views)}</td>
+                <td style={S.td}>{fmt(r.likes)}</td>
+                <td style={S.td}>
+                  {r.followers ? (r.views / r.followers).toFixed(2) : "—"}
+                </td>
+                <td
+                  style={{ ...S.td, maxWidth: 240, color: COLORS.textDim, fontSize: 12 }}
+                  title={r.caption}
+                >
+                  {r.caption?.slice(0, 80)}
+                  {r.caption?.length > 80 ? "…" : ""}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+
+  /* ── MAIN RENDER ── */
+  return (
+    <div style={S.page}>
+      <div style={S.container}>
+        {/* Header */}
+        <div style={S.header}>
+          <div style={S.title}>Social Media Dashboard</div>
+          <div style={S.subtitle}>
+            {platform === "tiktok" ? "TikTok" : "Instagram"} — {data.length} contenus chargés
+            <span
+              style={{
+                ...S.platformBadge,
+                background:
+                  platform === "tiktok" ? "rgba(0,0,0,0.4)" : "rgba(225,48,108,0.15)",
+                color: platform === "tiktok" ? "#fff" : "#e1306c",
+              }}
+            >
+              {platform === "tiktok" ? "♪ TikTok" : "📷 Instagram"}
+            </span>
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 4, marginBottom: 16, flexWrap: "wrap" }}>
-          {TABS.map(([k, l]) => (
-            <button key={k} onClick={() => setPage(k)} style={{ padding: "9px 20px", borderRadius: "10px 10px 0 0", border: "1px solid " + (page === k ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.08)"), borderBottom: page === k ? "2px solid #6366f1" : "1px solid rgba(255,255,255,0.08)", background: page === k ? "rgba(99,102,241,0.12)" : "rgba(255,255,255,0.03)", color: page === k ? "#fff" : "rgba(255,255,255,0.4)", fontSize: 13, fontWeight: page === k ? 700 : 400, cursor: "pointer" }}>
-              {l}{badge(k)}
+        {/* Toolbar */}
+        <div style={{ ...S.filterBar, justifyContent: "space-between" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              type="text"
+              placeholder="🔍 Rechercher..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{
+                ...S.select,
+                width: 220,
+              }}
+            />
+            <button
+              style={{ ...S.btn, ...S.btnPrimary, fontSize: 12, padding: "8px 16px" }}
+              onClick={() => exportExcel(data, platform, "all")}
+            >
+              📥 Export Excel
+            </button>
+          </div>
+          <button
+            style={{
+              ...S.btnSmall,
+              background: "rgba(225,112,85,0.15)",
+              color: COLORS.red,
+              border: `1px solid ${COLORS.border}`,
+              padding: "6px 12px",
+            }}
+            onClick={() => {
+              setData([]);
+              setPlatform(null);
+              setLocalExclude([]);
+              setSearchTerm("");
+            }}
+          >
+            🔄 Nouveau CSV
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div style={S.tabs}>
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              style={{
+                ...S.tab,
+                ...(activeTab === t.id ? S.tabActive : {}),
+              }}
+              onClick={() => setActiveTab(t.id)}
+            >
+              {t.label} ({t.count})
             </button>
           ))}
         </div>
 
-        {page === "contenus" && (<>
-          <KPI items={[["\ud83d\udcdd Posts", rows.length, "#a78bfa"], ["\ud83c\udfac Vid\u00e9os", rows.filter(r => isVideo(r.type) || r.platform === "tiktok").length, "#c084fc"], ["\ud83d\udc41 Vues", fmt(tot("views")), "#818cf8"], ["\u2764\ufe0f Likes", fmt(tot("likes")), "#f472b6"], ["\ud83d\udcac Com.", fmt(tot("comments")), "#60a5fa"]]} />
-          <SortTable data={rows} gridCols="35px 100px 80px 40px 1fr 80px 65px 60px 75px" exportData={expContenus} exportHeaders={hContenus} exportName="contenus"
-            columns={[
-              platCol,
-              { key: "compte", label: "Compte", bold: true, color: "#fff" },
-              { key: "date", label: "Date", render: r => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
-              { key: "type", label: "", render: r => typeIcon(r.type) },
-              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 120)}</a> : r.caption?.slice(0, 120) },
-              { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
-              { key: "likes", label: "Likes", fmt: true, color: "#f472b6" },
-              { key: "comments", label: "Com.", fmt: true, color: "#60a5fa" },
-              { key: "engagement", label: "Engage.", render: renderEng, color: "#34d399" },
-            ]} />
-        </>)}
-
-        {page === "marques" && (<>
-          <KPI items={[["\ud83c\udfe2 Comptes", brands.length, "#a78bfa"], ["\ud83c\udfac Vid\u00e9os", fmt(_.sumBy(brands, "nbVideos")), "#818cf8"], ["\ud83d\udc41 Moy. vues", fmt(Math.round(_.meanBy(brands, "avgViews") || 0)), "#f472b6"], ["\ud83d\udd25 Virales", fmt(_.sumBy(brands, "nbViral")), "#fbbf24"]]} />
-          <SortTable data={brands} gridCols="1fr 100px 120px 140px 100px 160px" exportData={expMarques} exportHeaders={hMarques} exportName="marques" searchPlaceholder={"\ud83d\udd0d Rechercher un compte..."}
-            columns={[
-              { key: "compte", label: "Compte", bold: true, color: "#fff" },
-              { key: "platforms", label: "Plat.", render: r => r.platforms?.map(p => platformIcon(p)).join(" ") },
-              { key: "nbVideos", label: "Vid\u00e9os", bold: true, color: "#818cf8" },
-              { key: "avgViews", label: "Moy. vues", render: r => fmt(Math.round(r.avgViews)), bold: true, color: "#f472b6" },
-              { key: "avgEngagement", label: "Engage.", render: r => <span style={{ color: "#34d399", fontWeight: 600 }}>{(r.avgEngagement * 100).toFixed(2)}%</span> },
-              { key: "nbViral", label: "> 2.5x moy.", render: r => <span>{r.nbViral > 0 ? <span style={{ color: "#fbbf24" }}>{r.nbViral}</span> : <span style={{ color: "rgba(255,255,255,0.25)" }}>0</span>}{r.nbViral > 0 && r.nbVideos > 0 && <span style={{ color: "rgba(255,255,255,0.3)", marginLeft: 6, fontSize: 11 }}>({Math.round(r.nbViral / r.nbVideos * 100)}%)</span>}</span> },
-            ]} />
-        </>)}
-
-        {page === "viraux" && (<>
-          <KPI items={[["\ud83d\udd25 Total", viralRows.length, "#fbbf24"], ["\u2744\ufe0f Froid", nbFroid, "#60a5fa"], ["\ud83d\udd25 Chaud", nbChaud, "#ef4444"]]} />
-          <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-            {[["froid", "\u2744\ufe0f Froid", "#60a5fa"], ["chaud", "\ud83d\udd25 Chaud", "#ef4444"], ["all", "Tous", "rgba(255,255,255,0.5)"]].map(([k, l, c]) => (
-              <button key={k} onClick={() => setViralFilter(k)} style={{ padding: "7px 14px", borderRadius: 8, border: viralFilter === k ? "1px solid " + c : "1px solid rgba(255,255,255,0.1)", background: viralFilter === k ? c + "22" : "transparent", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: viralFilter === k ? 600 : 400 }}>{l}</button>
-            ))}
-            <span style={{ marginLeft: "auto", fontSize: 11, color: "rgba(255,255,255,0.3)" }}>Clique \u2715 pour exclure</span>
-          </div>
-          <SortTable data={filteredViral} gridCols="35px 100px 75px 1fr 85px 80px 55px 70px 50px 35px 35px" exportData={expViraux} exportHeaders={hViraux} exportName="viraux"
-            columns={[
-              platCol,
-              { key: "compte", label: "Compte", bold: true, color: "#fff" },
-              { key: "date", label: "Date", render: r => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
-              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 90)}</a> : r.caption?.slice(0, 90) },
-              { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
-              { key: "avgCompte", label: "Moy.", fmt: true, color: "rgba(255,255,255,0.4)" },
-              { key: "ratio", label: "Ratio", render: r => <span style={{ color: "#fbbf24", fontWeight: 700 }}>{r.ratio}x</span> },
-              { key: "engagement", label: "Eng.", render: renderEng, color: "#34d399" },
-              { key: "tempType", label: "Type", render: r => r.tempType === "froid" ? <span style={{ color: "#60a5fa" }}>{"\u2744\ufe0f"}</span> : <span style={{ color: "#ef4444" }}>{"\ud83d\udd25"}</span> },
-              { key: "action", label: "", render: r => r.tempType === "chaud"
-                ? <button onClick={() => handleManualInclude(r.url)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#60a5fa" }} title="Remettre en froid">{"\u21a9\ufe0f"}</button>
-                : <button onClick={() => handleManualExclude(r.url)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#ef4444" }} title="Marquer comme chaud">{"\u2715"}</button>
-              },
-              linkCol,
-            ]} />
-        </>)}
-
-        {page === "suspects" && (<>
-          <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "12px 16px", marginBottom: 12 }}>
-            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", margin: 0 }}>{"\ud83e\udd14"} Vues &gt; 1.5x la moyenne du compte et engagement &lt; 1% \u2014 <strong style={{ color: "#fff" }}>{suspectRows.length} vid\u00e9os</strong></p>
-          </div>
-          <KPI items={[["\ud83e\udd14 Suspects", suspectRows.length, "#f472b6"], ["\ud83c\udfe2 Comptes", _.uniqBy(suspectRows, "compte").length, "#a78bfa"], ["\ud83d\udc41 Vues moy.", fmt(Math.round(_.meanBy(suspectRows, r => Number(r.views) || 0) || 0)), "#818cf8"]]} />
-          <SortTable data={suspectRows} gridCols="35px 100px 75px 1fr 85px 65px 75px 75px 35px" exportData={expSuspects} exportHeaders={hSuspects} exportName="suspects"
-            columns={[
-              platCol,
-              { key: "compte", label: "Compte", bold: true, color: "#fff" },
-              { key: "date", label: "Date", render: r => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
-              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 90)}</a> : r.caption?.slice(0, 90) },
-              { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
-              { key: "ratioVues", label: "x moy.", render: r => <span style={{ color: "#818cf8" }}>{r.ratioVues}x</span> },
-              { key: "eng", label: "Engage.", render: r => <span style={{ color: "#f472b6", fontWeight: 600 }}>{(r.eng * 100).toFixed(2)}%</span> },
-              { key: "avgEngCompte", label: "Moy. eng.", render: r => <span style={{ color: "rgba(255,255,255,0.35)" }}>{(r.avgEngCompte * 100).toFixed(2)}%</span> },
-              linkCol,
-            ]} />
-        </>)}
-
-        {page === "sponso" && (<>
-          <KPI items={[["\ud83e\udd1d Sponsos", sponsoRows.length, "#34d399"], ["\ud83c\udfe2 Comptes", _.uniqBy(sponsoRows, "compte").length, "#a78bfa"], ["\ud83d\udc41 Vues moy.", fmt(Math.round(_.meanBy(sponsoRows, r => Number(r.views) || 0) || 0)), "#818cf8"], ["\u2764\ufe0f Likes moy.", fmt(Math.round(_.meanBy(sponsoRows, r => Number(r.likes) || 0) || 0)), "#f472b6"]]} />
-          <SortTable data={sponsoRows} gridCols="35px 100px 80px 40px 1fr 80px 65px 60px 75px 35px" exportData={expSponso} exportHeaders={hSponso} exportName="sponso"
-            columns={[
-              platCol,
-              { key: "compte", label: "Compte", bold: true, color: "#fff" },
-              { key: "date", label: "Date", render: r => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
-              { key: "type", label: "", render: r => typeIcon(r.type) },
-              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 110)}</a> : r.caption?.slice(0, 110) },
-              { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
-              { key: "likes", label: "Likes", fmt: true, color: "#f472b6" },
-              { key: "comments", label: "Com.", fmt: true, color: "#60a5fa" },
-              { key: "engagement", label: "Engage.", render: renderEng, color: "#34d399" },
-              linkCol,
-            ]} />
-        </>)}
+        {/* Tab content */}
+        {activeTab === "contenus" && renderContenus()}
+        {activeTab === "marques" && renderMarques()}
+        {activeTab === "viraux" && renderViraux()}
+        {activeTab === "suspects" && renderGenericTable(suspects, "Suspects")}
+        {activeTab === "sponsos" && renderGenericTable(sponsos, "Sponsos")}
 
         {/* Footer */}
-        <div style={{ marginTop: 40, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.08)", textAlign: "center" }}>
-          <p style={{ color: "rgba(255,255,255,0.25)", fontSize: 11, margin: 0 }}>\u00a9 2026 Cl\u00e9ment Dubois \u2014 Tous droits r\u00e9serv\u00e9s</p>
-        </div>
+        <div style={S.footer}>© 2026 Clément Dubois — Tous droits réservés</div>
       </div>
     </div>
   );
