@@ -274,13 +274,13 @@ const KPI = ({ items }) => <div style={{ display: "grid", gridTemplateColumns: "
 /* ─── EXPORT BUILDERS ─── */
 const expContenus = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.week || "", r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
 const expMarques = rows => rows.map(b => [b.compte, b.platforms?.join("+"), b.nbVideos, b.avgVidsPerWeek, Math.round(b.avgViews), (b.avgEngagement*100).toFixed(2)+"%", b.nbViral, b.nbChaud, b.nbFroid]);
-const expViraux = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), cleanCap(r.caption), r.views ?? "", r.avgCompte ?? "", r.ratio ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.tempType || "", r.hotKeywordsFound || "", r.url]; });
+const expViraux = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.week || "", cleanCap(r.caption), r.views ?? "", r.avgCompte ?? "", r.ratio ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.tempType || "", r.hotKeywordsFound || "", r.url]; });
 const expSuspects = rows => rows.map(r => [r.platform, r.compte, fmtDate(r.date), cleanCap(r.caption), r.views ?? "", r.ratioVues ?? "", (r.eng*100).toFixed(2)+"%", (r.avgEngCompte*100).toFixed(2)+"%", r.url]);
 const expSponso = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
 
 const hContenus = ["Plateforme","Compte","Date","Semaine","Type","Caption","Vues","Likes","Com.","Engagement","URL"];
 const hMarques = ["Compte","Plateformes","Vid\u00e9os","Moy./Sem.","Moy. vues","Engagement","Virales","Chaud","Froid"];
-const hViraux = ["Plateforme","Compte","Date","Caption","Vues","Moy.","Ratio","Engagement","Type","Mots-cl\u00e9s","URL"];
+const hViraux = ["Plateforme","Compte","Date","Semaine","Caption","Vues","Moy.","Ratio","Engagement","Type","Mots-cl\u00e9s","URL"];
 const hSuspects = ["Plateforme","Compte","Date","Caption","Vues","Ratio","Engagement","Moy. eng.","URL"];
 const hSponso = ["Plateforme","Compte","Date","Type","Caption","Vues","Likes","Com.","Engagement","URL"];
 
