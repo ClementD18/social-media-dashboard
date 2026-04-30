@@ -3,9 +3,10 @@ import Papa from "papaparse";
 import _ from "lodash";
 import * as XLSX from "xlsx";
 
-/* ──────────────────────────────────────────────
+/* ───────────────────────────────────────────
    HELPERS
-   ────────────────────────────────────────────── */
+   ─────────────────────────────────────────── */
+
 const fmt = (v) => {
   if (v === null || v === undefined || v === "") return "—";
   const n = Number(v);
@@ -19,21 +20,19 @@ const fmtDate = (v) => {
   if (!v) return "—";
   try {
     const d = new Date(v);
-    return isNaN(d) ? v : d.toLocaleDateString("fr-FR");
-  } catch {
-    return v;
-  }
+    return isNaN(d) ? "—" : d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
+  } catch { return "—"; }
 };
 
 const fmtPct = (v) => {
-  if (v === null || v === undefined || v === "") return "—";
+  if (v === null || v === undefined) return "—";
   const n = Number(v);
   if (isNaN(n)) return "—";
-  return n.toFixed(2) + "%";
+  return (n * 100).toFixed(2) + "%";
 };
 
-/* ISO week number */
-const getWeekNumber = (dateStr) => {
+/* ISO 8601 week number */
+function getISOWeek(dateStr) {
   if (!dateStr) return null;
   const d = new Date(dateStr);
   if (isNaN(d)) return null;
@@ -41,14 +40,15 @@ const getWeekNumber = (dateStr) => {
   tmp.setUTCDate(tmp.getUTCDate() + 4 - (tmp.getUTCDay() || 7));
   const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
   return Math.ceil(((tmp - yearStart) / 86400000 + 1) / 7);
-};
+}
 
-const getWeekLabel = (dateStr) => {
-  const w = getWeekNumber(dateStr);
-  return w ? `S${w}` : "";
-};
+function getWeekLabel(dateStr) {
+  const w = getISOWeek(dateStr);
+  if (!w) return "";
+  return `S${w}`;
+}
 
-const getWeekRange = (dateStr) => {
+function getWeekRange(dateStr) {
   if (!dateStr) return "";
   const d = new Date(dateStr);
   if (isNaN(d)) return "";
@@ -59,512 +59,732 @@ const getWeekRange = (dateStr) => {
   sunday.setDate(monday.getDate() + 6);
   const f = (dt) => dt.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
   return `${f(monday)} – ${f(sunday)}`;
+}
+
+const typeIcon = (t) => {
+  if (!t) return "";
+  const l = String(t).toLowerCase();
+  if (l === "video" || l === "reels" || l === "reel") return "🎬";
+  if (l === "image" || l === "photo") return "🖼️";
+  if (l === "sidecar" || l === "carousel" || l === "album") return "📑";
+  return "📄";
 };
 
-/* ──────────────────────────────────────────────
-   MANUAL EXCLUDE LIST (hot content URLs)
-   ──────────────────────────────────────────────
-   Règles CHAUD : politique, faits divers, actu
-   internationale, guerres, décès, procès,
-   municipales, résultats sportifs, crues/inondations
-   
-   Règle FROID : tout le reste (lifestyle, culture,
-   témoignages intemporels, recettes, science, humour)
-   
-   En cas de doute → FROID
-   ────────────────────────────────────────────── */
+const platformIcon = (p) => (p === "tiktok" ? "🎵" : "📸");
+
+/* ───────────────────────────────────────────
+   MANUAL EXCLUDE (chaud/froid system)
+   URLs in this list are classified as "froid"
+   ─────────────────────────────────────────── */
 const MANUAL_EXCLUDE = [
-  // ══════════════════════════════════════════════
-  // INSTAGRAM — CHAUD
-  // ══════════════════════════════════════════════
-  "https://www.instagram.com/p/DXEJYTTgP7j/",
-  "https://www.instagram.com/p/DWuNt9uCTYP/",
-  "https://www.instagram.com/p/DWwDoH2kccQ/",
-  "https://www.instagram.com/p/DXE3vlCjxJR/",
-  "https://www.instagram.com/p/DXEhh-LEQ4w/",
-  "https://www.instagram.com/p/DWtc3aLkWZY/",
-  "https://www.instagram.com/p/DW9YSNTiBas/",
-  "https://www.instagram.com/p/DW9MyLHADzl/",
-  "https://www.instagram.com/p/DXH0icfCtO3/",
-  "https://www.instagram.com/p/DXJhyrSkb8R/",
-  "https://www.instagram.com/p/DW6oQokgA-K/",
-  "https://www.instagram.com/p/DW4bgLtmsux/",
-  "https://www.instagram.com/p/DWoVFs6D9Tn/",
-  "https://www.instagram.com/p/DXG7m7HjZiI/",
-  "https://www.instagram.com/p/DW8ckyYkXpl/",
-  "https://www.instagram.com/p/DW8m-fHl0zo/",
-  "https://www.instagram.com/p/DW0_eKkkoPX/",
-  "https://www.instagram.com/p/DXJYFHbFMU8/",
-  "https://www.instagram.com/p/DWxqmgfjgox/",
-  "https://www.instagram.com/p/DMfyPiyywEL/",
-  "https://www.instagram.com/p/DRDO4GAAM83/",
-  "https://www.instagram.com/p/DWySn1ikX3K/",
-  "https://www.instagram.com/p/DWmZu1ID32u/",
-  "https://www.instagram.com/p/DWlfDf3Daiv/",
-  "https://www.instagram.com/p/DXEb3yyAmnP/",
-  "https://www.instagram.com/p/DXB-UB6lbwv/",
-  "https://www.instagram.com/p/DWIvDRtj20p/",
-  "https://www.instagram.com/p/DXCZwlZkfj9/",
-  "https://www.instagram.com/p/DXCRj8aj-ai/",
-  "https://www.instagram.com/p/DW3_p1PjYX4/",
-  "https://www.instagram.com/p/DXB1jsgicHX/",
-  "https://www.instagram.com/p/DUlGE3EjY1a/",
-  "https://www.instagram.com/p/DW8gor_Cgb1/",
-  "https://www.instagram.com/p/DW9aeQZCj9_/",
-  "https://www.instagram.com/p/DW8aaWPFPOn/",
-  "https://www.instagram.com/p/DXHOw0YgHm4/",
-  "https://www.instagram.com/p/DW09w2fD2Yz/",
-  "https://www.instagram.com/p/DXBi6x0CWyC/",
-  "https://www.instagram.com/p/DXKcviIgNBK/",
-  "https://www.instagram.com/p/DW9kw98lLaH/",
-  "https://www.instagram.com/p/DWjxinHCWEI/",
-  "https://www.instagram.com/p/DXE3uoJid7w/",
-  "https://www.instagram.com/p/DWpFg6JEZxL/",
-  "https://www.instagram.com/p/DWoq6xtkxy6/",
-  "https://www.instagram.com/p/DXFTMVdFPEy/",
-  "https://www.instagram.com/p/DWlTUBZDZCj/",
-  "https://www.instagram.com/p/DWzDCNCgY7r/",
-  "https://www.instagram.com/p/DWlrL9TAU5g/",
-  "https://www.instagram.com/p/DXH1GVYgKIH/",
-  "https://www.instagram.com/p/DW4LbArCAjF/",
-  "https://www.instagram.com/p/DW09kE7lIbh/",
-  "https://www.instagram.com/p/DXFZp8bk6O1/",
-  "https://www.instagram.com/p/DWo-C4TkUml/",
-  "https://www.instagram.com/p/DWrllqvk_7A/",
-  "https://www.instagram.com/p/DWqzJxdjjiZ/",
-  "https://www.instagram.com/p/DWrS1hdDJTB/",
-  "https://www.instagram.com/p/DXHZITEidY8/",
-  "https://www.instagram.com/p/DW9gNx4gm9V/",
-  "https://www.instagram.com/p/DWyJtH5inQK/",
-  "https://www.instagram.com/p/DWwo5OADidl/",
-  "https://www.instagram.com/p/DXJ5g7Sklgh/",
-  "https://www.instagram.com/p/DWmBdjgkfMF/",
-  "https://www.instagram.com/p/DW5rEZmCb2b/",
-  "https://www.instagram.com/p/DWmTf8sCLKP/",
-  "https://www.instagram.com/p/DW1jfs8jC2L/",
-  "https://www.instagram.com/p/DW9aeKvgO2a/",
-  "https://www.instagram.com/p/DW1frk6lLgW/",
-  "https://www.instagram.com/p/DWzK0f1iV1x/",
-  "https://www.instagram.com/p/DW1y_8ekZWj/",
-  "https://www.instagram.com/p/DXE1aGvAATH/",
-  "https://www.instagram.com/p/DWrJ31FDh0h/",
-  "https://www.instagram.com/p/DW-3KwSjTGr/",
-  "https://www.instagram.com/p/DXEuZOUinTA/",
-  "https://www.instagram.com/p/DW9oeDvjiIZ/",
-  "https://www.instagram.com/p/DXJVGuCCkkq/",
-  "https://www.instagram.com/p/DW9Pg-llBVk/",
-  "https://www.instagram.com/p/DXE3tShhQCz/",
-  "https://www.instagram.com/p/DWmZo1ZAQv4/",
-  "https://www.instagram.com/p/DWt5rfdDp-t/",
-  "https://www.instagram.com/p/DW9XDyEFPjJ/",
-  "https://www.instagram.com/p/DXH3p-FCl_4/",
-  "https://www.instagram.com/p/DW8fnkvkqBh/",
-  "https://www.instagram.com/p/DW4fGfZCT9_/",
-  "https://www.instagram.com/p/DUBmzk0jlZM/",
-
-  // ══════════════════════════════════════════════
-  // TIKTOK — Politique / Municipales
-  // ══════════════════════════════════════════════
-  "https://www.tiktok.com/@leberryrepublicain/video/7610839452038040854",
-  "https://www.tiktok.com/@leberryrepublicain/video/7608266037099777302",
-  "https://www.tiktok.com/@france3paris_idf/video/7631625585793568022",
-  "https://www.tiktok.com/@france3paris_idf/video/7620499504172666114",
-  "https://www.tiktok.com/@france3paris_idf/video/7620226031147928854",
-  "https://www.tiktok.com/@france3paris_idf/video/7620205898668985622",
-  "https://www.tiktok.com/@france3bfc/video/7620460979834473750",
-  "https://www.tiktok.com/@france3bfc/video/7616425702904139030",
-  "https://www.tiktok.com/@f3cvdl/video/7627045065529117974",
-  "https://www.tiktok.com/@france_3_aura/video/7618619305864793366",
-  "https://www.tiktok.com/@nice_matin/video/7620146464475352352",
-  "https://www.tiktok.com/@presseocean/video/7618247047354797345",
-  "https://www.tiktok.com/@france3grandest/video/7633394259319622945",
-  "https://www.tiktok.com/@guyanela1ere/video/7620263045964598550",
-  "https://www.tiktok.com/@mayotte_la1ere/video/7620121970490838294",
-  "https://www.tiktok.com/@mayotte_la1ere/video/7617566311257853206",
-  "https://www.tiktok.com/@martiniquela1ere/video/7613862466275052822",
-  "https://www.tiktok.com/@vert_le_media/video/7620197107013635350",
-  "https://www.tiktok.com/@publicsenat/video/7633415524239559968",
-  "https://www.tiktok.com/@publicsenat/video/7633391388171717921",
-  "https://www.tiktok.com/@publicsenat/video/7629022820927851809",
-  "https://www.tiktok.com/@lcp_an/video/7633506803971624214",
-  "https://www.tiktok.com/@lcp_an/video/7629405524206882070",
-  "https://www.tiktok.com/@lcp_an/video/7628936274145070358",
-  "https://www.tiktok.com/@lcp_an/video/7627071925310983446",
-  "https://www.tiktok.com/@lcp_an/video/7626801588618726678",
-  "https://www.tiktok.com/@lcp_an/video/7626427140946365719",
-  "https://www.tiktok.com/@lcp_an/video/7626411653105585430",
-  "https://www.tiktok.com/@quotidienofficiel/video/7631160806117412119",
-  "https://www.tiktok.com/@lalsacefr/video/7626998813688876320",
-  "https://www.tiktok.com/@slatefr/video/7623421208188521750",
-  "https://www.tiktok.com/@mediapartfr/video/7603080506258771222",
-  "https://www.tiktok.com/@bonpoteofficiel/video/7624260322794196246",
-  "https://www.tiktok.com/@bonpoteofficiel/video/7623087828053855510",
-  "https://www.tiktok.com/@france3pdl/video/7627121216612076822",
-
-  // ══════════════════════════════════════════════
-  // TIKTOK — Guerre / Actu internationale
-  // ══════════════════════════════════════════════
-  "https://www.tiktok.com/@france24/video/7633389529398824225",
-  "https://www.tiktok.com/@france24/video/7631903644610268449",
-  "https://www.tiktok.com/@france24/video/7630794750517398816",
-  "https://www.tiktok.com/@france24/video/7626755995364117793",
-  "https://www.tiktok.com/@france24/video/7626273399660236064",
-  "https://www.tiktok.com/@rfi/video/7633450539665100064",
-  "https://www.tiktok.com/@rfi/video/7632016390852988192",
-  "https://www.tiktok.com/@afpfr/video/7633386630237179168",
-  "https://www.tiktok.com/@afpfr/video/7631598626363493664",
-  "https://www.tiktok.com/@lemondefr/video/7632721117618195745",
-  "https://www.tiktok.com/@lemondefr/video/7632611639543581984",
-  "https://www.tiktok.com/@m6info_/video/7611976512387992854",
-  "https://www.tiktok.com/@m6info_/video/7612224093676490006",
-  "https://www.tiktok.com/@tf1info/video/7633412640009653526",
-  "https://www.tiktok.com/@tf1info/video/7633000751064714518",
-  "https://www.tiktok.com/@tf1info/video/7632967246033194262",
-  "https://www.tiktok.com/@tf1info/video/7632959527763102998",
-  "https://www.tiktok.com/@tf1info/video/7632340338190912790",
-  "https://www.tiktok.com/@cnews/video/7632326054442503426",
-  "https://www.tiktok.com/@cnews/video/7631872318519708950",
-  "https://www.tiktok.com/@quotidienofficiel/video/7632299425490062614",
-  "https://www.tiktok.com/@quotidienofficiel/video/7631185001958198550",
-  "https://www.tiktok.com/@france.inter/video/7616803817056701718",
-  "https://www.tiktok.com/@france.inter/video/7594203974325062934",
-  "https://www.tiktok.com/@lehuffpostfr/video/7620046573619154198",
-  "https://www.tiktok.com/@alter_eco/video/7600860831315741974",
-  "https://www.tiktok.com/@lexpress/video/7626690577739894049",
-  "https://www.tiktok.com/@lexpress/video/7625893282999995680",
-  "https://www.tiktok.com/@lesechos.fr/video/7620520004328443158",
-  "https://www.tiktok.com/@mariannelemag/video/7612712245595786518",
-  "https://www.tiktok.com/@brutofficiel/video/7633513953645088022",
-  "https://www.tiktok.com/@brutofficiel/video/7632927394923400470",
-  "https://www.tiktok.com/@brutofficiel/video/7632914180223421718",
-  "https://www.tiktok.com/@franceinfo/video/7633321088021286177",
-  "https://www.tiktok.com/@franceinfo/video/7633058203047103766",
-  "https://www.tiktok.com/@franceinfo/video/7633012537059003670",
-  "https://www.tiktok.com/@bfmtv/video/7633351871633132822",
-  "https://www.tiktok.com/@bfmtv/video/7633311317675265302",
-  "https://www.tiktok.com/@bfmtv/video/7632981364928761110",
-  "https://www.tiktok.com/@bfmtv/video/7632916314889162006",
-  "https://www.tiktok.com/@bfmtv/video/7633100330263219478",
-  "https://www.tiktok.com/@sellmeparis/video/7628543896225697046",
-  "https://www.tiktok.com/@le20hfrancetelevisions/video/7633686669694127392",
-  "https://www.tiktok.com/@bonpoteofficiel/video/7622669972388580630",
-  "https://www.tiktok.com/@ladepechedumidi/video/7613726644091489558",
-
-  // ══════════════════════════════════════════════
-  // TIKTOK — Faits divers (actu chaude)
-  // ══════════════════════════════════════════════
-  "https://www.tiktok.com/@france3grandest/video/7629002715707788577",
-  "https://www.tiktok.com/@france3normandie/video/7631182829015026966",
-  "https://www.tiktok.com/@france3occitanie/video/7626811857889676576",
-  "https://www.tiktok.com/@france3pdl/video/7631124594455285014",
-  "https://www.tiktok.com/@france3pdl/video/7627162781720120598",
-  "https://www.tiktok.com/@leparisien/video/7629354105072291094",
-  "https://www.tiktok.com/@leparisien/video/7632729029623254294",
-  "https://www.tiktok.com/@leparisien/video/7630893311032593686",
-  "https://www.tiktok.com/@lemondefr/video/7631103307838197025",
-  "https://www.tiktok.com/@france3paca/video/7632727867616546081",
-  "https://www.tiktok.com/@polynesiela1ere/video/7634017584429616400",
-  "https://www.tiktok.com/@polynesiela1ere/video/7633274591888100626",
-  "https://www.tiktok.com/@polynesiela1ere/video/7631802032634055957",
-  "https://www.tiktok.com/@polynesiela1ere/video/7619965872853028097",
-  "https://www.tiktok.com/@ncla1ere/video/7626636762449743125",
-  "https://www.tiktok.com/@lefigaro/video/7633477375723867424",
-
-  // ══════════════════════════════════════════════
-  // TIKTOK — Procès / Justice (actu)
-  // ══════════════════════════════════════════════
-  "https://www.tiktok.com/@septahuit_off/video/7628521240591944982",
-  "https://www.tiktok.com/@bfmbusiness/video/7628237841675472150",
-  "https://www.tiktok.com/@corsematin/video/7620945076704906528",
-
-  // ══════════════════════════════════════════════
-  // TIKTOK — Décès (actu)
-  // ══════════════════════════════════════════════
-  "https://www.tiktok.com/@tv5monde/video/7632238039103704342",
-  "https://www.tiktok.com/@nice_matin/video/7627051571745918241",
-  "https://www.tiktok.com/@nice_matin/video/7627044897077464353",
-  "https://www.tiktok.com/@nouvelobs/video/7621902151811337505",
-  "https://www.tiktok.com/@slatefr/video/7608923214730890518",
-
-  // ══════════════════════════════════════════════
-  // TIKTOK — Résultats sportifs (actu)
-  // ══════════════════════════════════════════════
-  "https://www.tiktok.com/@lequipe/video/7633114097067773216",
-  "https://www.tiktok.com/@lequipe/video/7632310113763593505",
-  "https://www.tiktok.com/@lequipe/video/7631945981642181921",
-  "https://www.tiktok.com/@lequipe/video/7630938183240322336",
-  "https://www.tiktok.com/@laprovence_/video/7633196331946806561",
-  "https://www.tiktok.com/@laprovence_/video/7630158996199968022",
-  "https://www.tiktok.com/@lavoixdunord/video/7631616549576756483",
-  "https://www.tiktok.com/@france3grandest/video/7630833042642193696",
-  "https://www.tiktok.com/@bfmbusiness/video/7633470590065724694",
-
-  // ══════════════════════════════════════════════
-  // TIKTOK — Crues / Inondations
-  // ══════════════════════════════════════════════
-  "https://www.tiktok.com/@leberryrepublicain/video/7608619058497408278",
-  "https://www.tiktok.com/@ici.officiel/video/7608529465123163424",
+  // Ajouter ici les URLs à exclure manuellement (vidéos froides)
+  // "https://www.instagram.com/reel/xxx/",
+  // "https://www.tiktok.com/@user/video/xxx",
 ];
 
-/* ──────────────────────────────────────────────
-   COLUMN AUTO-DETECTION (Instagram + TikTok)
-   ────────────────────────────────────────────── */
-const COLUMN_MAPS = {
-  instagram: {
-    url: ["url", "inputUrl", "input_url", "postUrl", "post_url", "shortCode"],
-    date: ["timestamp", "date", "createDate", "created_at", "takenAt"],
-    caption: ["caption", "text", "description", "alt"],
-    likes: ["likesCount", "likes", "like_count", "diggCount"],
-    comments: ["commentsCount", "comments", "comment_count", "commentCount"],
-    views: ["videoViewCount", "views", "view_count", "playCount", "videoPlayCount"],
-    shares: ["sharesCount", "shares", "share_count", "shareCount"],
-    saves: ["savesCount", "saves", "save_count", "collectCount"],
-    owner: ["ownerUsername", "owner", "username", "author", "authorMeta/name", "uniqueId"],
-    followers: ["followersCount", "followers", "follower_count", "authorMeta/fans"],
-    type: ["type", "mediaType", "media_type"],
-    music: ["musicMeta/musicName", "music", "audio", "musicName"],
-    hashtags: ["hashtags", "challenges", "tags"],
-    sponsored: ["isSponsored", "isPaidPartnership", "branded", "is_paid_partnership"],
-    duration: ["videoDuration", "duration", "video_duration"],
-    er: ["engagementRate", "er", "engagement_rate"],
-  },
-  tiktok: {
-    url: ["webVideoUrl", "url", "video_url", "inputUrl", "input_url"],
-    date: ["createTimeISO", "createTime", "date", "created_at", "timestamp"],
-    caption: ["text", "desc", "caption", "description"],
-    likes: ["diggCount", "likes", "likesCount", "like_count", "stats/diggCount"],
-    comments: ["commentCount", "comments", "commentsCount", "comment_count", "stats/commentCount"],
-    views: ["playCount", "views", "videoViewCount", "view_count", "stats/playCount"],
-    shares: ["shareCount", "shares", "sharesCount", "share_count", "stats/shareCount"],
-    saves: ["collectCount", "saves", "savesCount", "save_count", "stats/collectCount"],
-    owner: ["authorMeta/name", "uniqueId", "author", "ownerUsername", "username", "authorMeta/uniqueId"],
-    followers: ["authorMeta/fans", "followers", "followersCount", "follower_count", "authorMeta/followers"],
-    type: ["type", "mediaType"],
-    music: ["musicMeta/musicName", "music", "audio", "musicName"],
-    hashtags: ["challenges", "hashtags", "tags"],
-    sponsored: ["isAd", "isPaidPartnership", "isSponsored", "branded"],
-    duration: ["videoMeta/duration", "duration", "videoDuration", "video_duration"],
-    er: ["engagementRate", "er", "engagement_rate"],
-  },
-};
+/* ───────────────────────────────────────────
+   SPONSO KEYWORDS
+   ─────────────────────────────────────────── */
+const SPONSO_KEYWORDS = [
+  "sponsorisé", "sponsorise", "en collaboration", "partenariat", "partenaire",
+  "partnership", "sponsored", "paid partnership", "collab ", "ad ", "#ad",
+  "#pub", "#sponso", "#partenariat", "#sponsored",
+];
 
-const detectPlatform = (headers) => {
-  const h = headers.map((c) => c.toLowerCase());
-  const tiktokSignals = ["diggcount", "playcountcount", "collectcount", "createtimeiso", "authormeta/name", "webvideourl", "uniqueid"];
-  const matchCount = tiktokSignals.filter((s) => h.some((hh) => hh.includes(s.toLowerCase()))).length;
-  return matchCount >= 2 ? "tiktok" : "instagram";
-};
+/* ───────────────────────────────────────────
+   CSV PLATFORM DETECTION + MAPPING
+   ─────────────────────────────────────────── */
 
-const resolveCol = (row, candidates) => {
-  for (const c of candidates) {
-    if (c.includes("/")) {
-      const parts = c.split("/");
-      let val = row;
-      for (const p of parts) { val = val?.[p]; if (val === undefined) break; }
-      if (val !== undefined) return val;
-    }
-    if (row[c] !== undefined && row[c] !== null && row[c] !== "") return row[c];
+function detectPlatform(row) {
+  if (row["ownerUsername"] || row["ownerFullName"] || row["videoViewCount"]) return "instagram";
+  if (row["authorMeta.name"] || row["playCount"] || row["diggCount"]) return "tiktok";
+  return "unknown";
+}
+
+function mapRow(row) {
+  const g = (k) => {
+    const v = row[k];
+    return v !== undefined && v !== null && v !== "" ? v : null;
+  };
+  const platform = detectPlatform(row);
+
+  if (platform === "tiktok") {
+    const paid = g("isPaidPartnership") || g("paidPartnership");
+    return {
+      compte: g("authorMeta.name") || "—",
+      date: g("createTimeISO"),
+      type: "Video",
+      caption: g("text") || "—",
+      views: g("playCount"),
+      likes: g("diggCount"),
+      comments: g("commentCount"),
+      shares: g("shareCount"),
+      saves: g("collectCount"),
+      duration: g("videoMeta.duration"),
+      url: g("webVideoUrl") || "",
+      isPaid: paid,
+      platform: "tiktok",
+    };
   }
-  return null;
-};
 
-const mapRow = (row, colMap) => ({
-  url: resolveCol(row, colMap.url) || "",
-  date: resolveCol(row, colMap.date) || "",
-  caption: resolveCol(row, colMap.caption) || "",
-  likes: Number(resolveCol(row, colMap.likes)) || 0,
-  comments: Number(resolveCol(row, colMap.comments)) || 0,
-  views: Number(resolveCol(row, colMap.views)) || 0,
-  shares: Number(resolveCol(row, colMap.shares)) || 0,
-  saves: Number(resolveCol(row, colMap.saves)) || 0,
-  owner: resolveCol(row, colMap.owner) || "Inconnu",
-  followers: Number(resolveCol(row, colMap.followers)) || 0,
-  type: resolveCol(row, colMap.type) || "",
-  music: resolveCol(row, colMap.music) || "",
-  hashtags: resolveCol(row, colMap.hashtags) || "",
-  sponsored: resolveCol(row, colMap.sponsored),
-  duration: Number(resolveCol(row, colMap.duration)) || 0,
-  er: Number(resolveCol(row, colMap.er)) || 0,
-});
+  // Instagram
+  const paid =
+    g("isPaidPartnership") || g("paidPartnership") || g("is_paid_partnership") ||
+    g("paid_partnership") || g("brandedContentTagName") || g("branded_content_tag_name") ||
+    g("sponsorTags/0") || g("sponsor_tags/0");
+  return {
+    compte: g("ownerUsername") || g("ownerFullName") || "—",
+    date: g("timestamp"),
+    type: g("type") || g("productType") || "",
+    caption: g("caption") || "—",
+    views: g("videoViewCount") ?? g("videoPlayCount") ?? g("video_view_count") ?? null,
+    likes: g("likesCount") ?? g("likes_count") ?? g("likesCount") ?? null,
+    comments: g("commentsCount") ?? g("comments_count") ?? null,
+    shares: g("sharesCount") ?? g("shares_count") ?? null,
+    saves: g("savesCount") ?? g("saves_count") ?? null,
+    duration: g("videoDuration") ?? g("video_duration") ?? null,
+    url: g("url") || g("shortCode") ? `https://www.instagram.com/p/${g("shortCode")}/` : "",
+    isPaid: paid,
+    platform: "instagram",
+  };
+}
 
-const SUSPECT_KEYWORDS = ["pub","partenariat","collaboration","sponsor","sponsorisé","gifted","offert","collab","promo","ambassador","ambassadeur","ambassadrice","#ad","#pub","#sponsorisé","#partenariat","lien en bio","code promo","link in bio","discount code","affiliated","affilié"];
-const isSuspectSponso = (row) => { const txt = (row.caption || "").toLowerCase(); return SUSPECT_KEYWORDS.some((kw) => txt.includes(kw.toLowerCase())); };
-const isConfirmedSponso = (row) => { const v = row.sponsored; return v === true || v === "true" || v === 1 || v === "1" || v === "yes"; };
+/* ───────────────────────────────────────────
+   HOT / COLD classification
+   - "froid" = URL is in MANUAL_EXCLUDE
+   - "chaud" = everything else
+   ─────────────────────────────────────────── */
 
-const isHot = (row) => MANUAL_EXCLUDE.includes(row.url);
-const isCold = (row) => !isHot(row);
+function classifyHotCold(row) {
+  if (!row.url) return "chaud";
+  return MANUAL_EXCLUDE.some((u) => row.url.includes(u)) ? "froid" : "chaud";
+}
 
-const VIRAL_THRESHOLD = 2;
-const isViral = (row) => { if (!row.followers || row.followers === 0) return row.views > 100000; return row.views / row.followers >= VIRAL_THRESHOLD; };
+/* ───────────────────────────────────────────
+   SORTABLE TABLE COMPONENT
+   ─────────────────────────────────────────── */
 
-const COLORS = { bg:"#0f1117", card:"#1a1d27", cardHover:"#22263a", border:"#2a2e3f", accent:"#6c5ce7", accentLight:"#a29bfe", text:"#e2e8f0", textDim:"#94a3b8", textMuted:"#64748b", green:"#00b894", red:"#e17055", orange:"#fdcb6e", blue:"#74b9ff", pink:"#fd79a8", white:"#ffffff" };
-
-const S = {
-  page: { minHeight:"100vh", background:`linear-gradient(135deg, ${COLORS.bg} 0%, #1a1025 50%, ${COLORS.bg} 100%)`, color:COLORS.text, fontFamily:"'Segoe UI', system-ui, -apple-system, sans-serif", padding:"0" },
-  container: { maxWidth:1400, margin:"0 auto", padding:"24px 20px" },
-  header: { textAlign:"center", marginBottom:32 },
-  title: { fontSize:28, fontWeight:800, background:`linear-gradient(135deg, ${COLORS.accentLight}, ${COLORS.pink})`, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", marginBottom:8 },
-  subtitle: { fontSize:14, color:COLORS.textDim },
-  dropzone: { border:`2px dashed ${COLORS.border}`, borderRadius:16, padding:"48px 24px", textAlign:"center", cursor:"pointer", transition:"all 0.3s ease", background:COLORS.card, marginBottom:24 },
-  dropzoneActive: { borderColor:COLORS.accent, background:"rgba(108,92,231,0.1)" },
-  tabs: { display:"flex", gap:4, marginBottom:24, background:COLORS.card, borderRadius:12, padding:4, flexWrap:"wrap" },
-  tab: { padding:"10px 18px", borderRadius:8, border:"none", cursor:"pointer", fontSize:13, fontWeight:600, transition:"all 0.2s ease", background:"transparent", color:COLORS.textDim, whiteSpace:"nowrap" },
-  tabActive: { background:COLORS.accent, color:COLORS.white },
-  table: { width:"100%", borderCollapse:"separate", borderSpacing:0, fontSize:13 },
-  th: { padding:"12px 14px", textAlign:"left", fontWeight:700, color:COLORS.textDim, borderBottom:`2px solid ${COLORS.border}`, position:"sticky", top:0, background:COLORS.card, zIndex:1, whiteSpace:"nowrap", fontSize:11, textTransform:"uppercase", letterSpacing:"0.05em" },
-  td: { padding:"10px 14px", borderBottom:`1px solid ${COLORS.border}`, verticalAlign:"middle", maxWidth:260, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
-  tr: { transition:"background 0.15s ease" },
-  btn: { padding:"10px 20px", borderRadius:8, border:"none", cursor:"pointer", fontWeight:600, fontSize:13, transition:"all 0.2s ease" },
-  btnPrimary: { background:COLORS.accent, color:COLORS.white },
-  btnSmall: { padding:"4px 10px", fontSize:12, borderRadius:6, border:"none", cursor:"pointer", fontWeight:600 },
-  kpiGrid: { display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))", gap:16, marginBottom:24 },
-  kpiCard: { background:COLORS.card, borderRadius:12, padding:"18px 20px", border:`1px solid ${COLORS.border}` },
-  kpiLabel: { fontSize:11, color:COLORS.textDim, textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 },
-  kpiValue: { fontSize:24, fontWeight:800 },
-  badge: { display:"inline-block", padding:"2px 8px", borderRadius:4, fontSize:11, fontWeight:700 },
-  filterBar: { display:"flex", gap:8, marginBottom:16, flexWrap:"wrap", alignItems:"center" },
-  select: { padding:"8px 12px", borderRadius:8, border:`1px solid ${COLORS.border}`, background:COLORS.card, color:COLORS.text, fontSize:13 },
-  footer: { textAlign:"center", padding:"24px 0 12px", color:COLORS.textMuted, fontSize:12, borderTop:`1px solid ${COLORS.border}`, marginTop:40 },
-  tableWrap: { overflowX:"auto", background:COLORS.card, borderRadius:12, border:`1px solid ${COLORS.border}` },
-  platformBadge: { display:"inline-block", padding:"2px 8px", borderRadius:4, fontSize:11, fontWeight:700, marginLeft:8 },
-  infoBanner: { background:"rgba(116,185,255,0.08)", border:"1px solid rgba(116,185,255,0.2)", borderRadius:12, padding:"14px 18px", marginBottom:20, fontSize:13, color:COLORS.textDim, lineHeight:1.5 },
-};
-
-const exportExcel = (data, platform, tab) => {
-  const wb = XLSX.utils.book_new();
-  const makeSheet = (rows, name) => { const ws = XLSX.utils.json_to_sheet(rows.map((r) => ({ URL:r.url, Date:fmtDate(r.date), Semaine:getWeekLabel(r.date), Compte:r.owner, Caption:r.caption, Vues:r.views, Likes:r.likes, Commentaires:r.comments, Partages:r.shares, Saves:r.saves, Followers:r.followers, "Ratio V/F":r.followers?(r.views/r.followers).toFixed(2):"—", "Chaud/Froid":isHot(r)?"Chaud":"Froid" }))); XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31)); };
-  if (tab === "all") { makeSheet(data, "Contenus"); const viraux = data.filter(isViral); makeSheet(viraux.filter(isCold), "Viraux Froid"); makeSheet(viraux.filter(isHot), "Viraux Chaud"); makeSheet(data.filter(isSuspectSponso), "Suspects"); makeSheet(data.filter(isConfirmedSponso), "Sponsos"); } else { makeSheet(data, tab); }
-  XLSX.writeFile(wb, `dashboard_${platform}_${new Date().toISOString().slice(0, 10)}.xlsx`);
-};
-
-export default function Dashboard() {
-  const [data, setData] = useState([]);
-  const [platform, setPlatform] = useState(null);
-  const [activeTab, setActiveTab] = useState("contenus");
-  const [dragOver, setDragOver] = useState(false);
-  const [sortCol, setSortCol] = useState("views");
+function SortTable({ data, columns, gridCols, builder, onAction }) {
+  const [sortKey, setSortKey] = useState(null);
   const [sortDir, setSortDir] = useState("desc");
-  const [viralFilter, setViralFilter] = useState("froid");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [localExclude, setLocalExclude] = useState([]);
+  const [search, setSearch] = useState("");
 
-  const allExclude = useMemo(() => new Set([...MANUAL_EXCLUDE, ...localExclude]), [localExclude]);
-  const isHotLive = useCallback((row) => allExclude.has(row.url), [allExclude]);
-  const isColdLive = useCallback((row) => !allExclude.has(row.url), [allExclude]);
-
-  const handleFile = useCallback((file) => {
-    Papa.parse(file, { header:true, skipEmptyLines:true, dynamicTyping:true, complete:(results) => {
-      const headers = results.meta.fields || [];
-      const detected = detectPlatform(headers);
-      setPlatform(detected);
-      const colMap = COLUMN_MAPS[detected];
-      const mapped = results.data.map((row) => mapRow(row, colMap)).filter((r) => r.url);
-      setData(mapped);
-      setActiveTab("contenus");
-    }});
-  }, []);
-
-  const onDrop = useCallback((e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer?.files?.[0] || e.target?.files?.[0]; if (f) handleFile(f); }, [handleFile]);
-
-  const doSort = (col) => { if (sortCol === col) setSortDir((d) => (d === "desc" ? "asc" : "desc")); else { setSortCol(col); setSortDir("desc"); } };
-  const sortData = useCallback((arr) => _.orderBy(arr, [(r) => (typeof r[sortCol] === "number" ? r[sortCol] : 0)], [sortDir]), [sortCol, sortDir]);
-  const filterSearch = useCallback((arr) => { if (!searchTerm) return arr; const q = searchTerm.toLowerCase(); return arr.filter((r) => (r.caption||"").toLowerCase().includes(q) || (r.owner||"").toLowerCase().includes(q) || (r.url||"").toLowerCase().includes(q)); }, [searchTerm]);
-
-  const contenus = useMemo(() => sortData(filterSearch(data)), [data, sortData, filterSearch]);
-  const viraux = useMemo(() => { const v = data.filter(isViral); if (viralFilter === "froid") return sortData(filterSearch(v.filter(isColdLive))); if (viralFilter === "chaud") return sortData(filterSearch(v.filter(isHotLive))); return sortData(filterSearch(v)); }, [data, sortData, filterSearch, viralFilter, isColdLive, isHotLive]);
-  const froidRows = useMemo(() => sortData(filterSearch(data.filter(isViral).filter(isColdLive))), [data, sortData, filterSearch, isColdLive]);
-  const suspects = useMemo(() => sortData(filterSearch(data.filter(isSuspectSponso))), [data, sortData, filterSearch]);
-  const sponsos = useMemo(() => sortData(filterSearch(data.filter(isConfirmedSponso))), [data, sortData, filterSearch]);
-
-  const marquesData = useMemo(() => {
-    const groups = _.groupBy(data, "owner");
-    const allWeeks = new Set(data.map((r) => getWeekLabel(r.date)).filter(Boolean));
-    const nbWeeks = Math.max(allWeeks.size, 1);
-    return Object.entries(groups).map(([owner, rows]) => {
-      const totalViews = _.sumBy(rows,"views"); const totalLikes = _.sumBy(rows,"likes"); const totalComments = _.sumBy(rows,"comments"); const totalShares = _.sumBy(rows,"shares"); const totalSaves = _.sumBy(rows,"saves");
-      const avgFollowers = Math.round(_.meanBy(rows,"followers")); const nbVideos = rows.length; const nbVirales = rows.filter(isViral).length;
-      const nbHot = rows.filter(isHotLive).length; const nbCold = rows.filter(isColdLive).length;
-      const avgViewsPerVideo = Math.round(totalViews / nbVideos); const avgVideosPerWeek = (nbVideos / nbWeeks).toFixed(1);
-      const avgER = avgFollowers > 0 ? (((totalLikes + totalComments) / nbVideos / avgFollowers) * 100).toFixed(2) : 0;
-      return { owner, nbVideos, totalViews, totalLikes, totalComments, totalShares, totalSaves, avgFollowers, avgViewsPerVideo, avgER, nbVirales, nbHot, nbCold, avgVideosPerWeek };
-    }).filter((m) => m.nbVideos >= 3).sort((a, b) => b.totalViews - a.totalViews);
-  }, [data, isHotLive, isColdLive]);
-
-  const toggleHot = (url) => { setLocalExclude((prev) => prev.includes(url) ? prev.filter((u) => u !== url) : [...prev, url]); };
-
-  const SortHeader = ({ col, label }) => (<th style={{ ...S.th, cursor:"pointer", userSelect:"none" }} onClick={() => doSort(col)}>{label} {sortCol === col ? (sortDir === "desc" ? "▼" : "▲") : ""}</th>);
-  const KPI = ({ label, value, color }) => (<div style={S.kpiCard}><div style={S.kpiLabel}>{label}</div><div style={{ ...S.kpiValue, color: color || COLORS.accentLight }}>{value}</div></div>);
-
-  if (data.length === 0) {
-    return (<div style={S.page}><div style={S.container}><div style={S.header}><div style={S.title}>Social Media Dashboard</div><div style={S.subtitle}>Instagram & TikTok — Analyse de contenus</div></div>
-      <div style={{ ...S.dropzone, ...(dragOver ? S.dropzoneActive : {}) }} onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={onDrop} onClick={() => document.getElementById("csv-input").click()}>
-        <div style={{ fontSize:48, marginBottom:16 }}>📂</div><div style={{ fontSize:18, fontWeight:700, marginBottom:8 }}>Importe ton fichier Apify</div><div style={{ color:COLORS.textDim, fontSize:14 }}>Glisse ton CSV ici ou clique pour parcourir</div><div style={{ color:COLORS.textMuted, fontSize:12, marginTop:8 }}>Détection automatique Instagram / TikTok</div>
-        <input id="csv-input" type="file" accept=".csv" style={{ display:"none" }} onChange={(e) => { if (e.target.files[0]) handleFile(e.target.files[0]); }} />
-      </div><div style={S.footer}>© 2026 Clément Dubois — Tous droits réservés</div></div></div>);
-  }
-
-  const totalViews = _.sumBy(data,"views"); const totalLikes = _.sumBy(data,"likes"); const totalViraux = data.filter(isViral).length;
-  const totalFroid = data.filter(isViral).filter(isColdLive).length; const totalChaud = data.filter(isViral).filter(isHotLive).length;
-  const nbBrands = new Set(data.map((r) => r.owner)).size;
-
-  const TABS = [
-    { id:"contenus", label:"📋 Contenus", count:data.length },
-    { id:"marques", label:"🏷️ Marques", count:marquesData.length },
-    { id:"froid", label:"❄️ Froid", count:totalFroid },
-    { id:"viraux", label:"🔥 Viraux", count:totalViraux },
-    { id:"suspects", label:"🔍 Suspects", count:suspects.length },
-    { id:"sponsos", label:"💰 Sponsos", count:sponsos.length },
-  ];
-
-  const RowHover = ({ children, i, hot }) => {
-    const bg = hot ? "rgba(225,112,85,0.06)" : i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)";
-    return (<tr style={{ ...S.tr, background:bg }} onMouseEnter={(e) => (e.currentTarget.style.background = COLORS.cardHover)} onMouseLeave={(e) => (e.currentTarget.style.background = bg)}>{children}</tr>);
+  const toggle = (key) => {
+    if (sortKey === key) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    else { setSortKey(key); setSortDir("desc"); }
   };
 
-  const renderContenus = () => (<><div style={S.kpiGrid}><KPI label="Total vidéos" value={fmt(data.length)} color={COLORS.blue} /><KPI label="Total vues" value={fmt(totalViews)} color={COLORS.green} /><KPI label="Total likes" value={fmt(totalLikes)} color={COLORS.pink} /><KPI label="Viraux" value={fmt(totalViraux)} color={COLORS.orange} /><KPI label="Marques" value={fmt(nbBrands)} color={COLORS.accentLight} /></div>
-    <div style={S.tableWrap}><table style={S.table}><thead><tr><th style={S.th}>#</th><th style={S.th}>Date</th><th style={S.th}>Semaine</th><th style={S.th}>Compte</th><SortHeader col="views" label="Vues" /><SortHeader col="likes" label="Likes" /><SortHeader col="comments" label="Com." /><SortHeader col="shares" label="Part." /><SortHeader col="saves" label="Saves" /><th style={S.th}>Ratio V/F</th><th style={S.th}>Caption</th></tr></thead>
-    <tbody>{contenus.map((r, i) => (<RowHover key={r.url+i} i={i}><td style={{ ...S.td, color:COLORS.textMuted }}>{i+1}</td><td style={S.td}>{fmtDate(r.date)}</td><td style={S.td}><span style={{ ...S.badge, background:"rgba(108,92,231,0.15)", color:COLORS.accentLight }}>{getWeekLabel(r.date)}</span><span style={{ fontSize:10, color:COLORS.textMuted, marginLeft:4 }}>{getWeekRange(r.date)}</span></td><td style={{ ...S.td, fontWeight:600 }}><a href={r.url} target="_blank" rel="noopener noreferrer" style={{ color:COLORS.accentLight, textDecoration:"none" }}>{r.owner}</a></td><td style={{ ...S.td, fontWeight:700 }}>{fmt(r.views)}</td><td style={S.td}>{fmt(r.likes)}</td><td style={S.td}>{fmt(r.comments)}</td><td style={S.td}>{fmt(r.shares)}</td><td style={S.td}>{fmt(r.saves)}</td><td style={S.td}><span style={{ ...S.badge, background:r.followers && r.views/r.followers>=VIRAL_THRESHOLD?"rgba(0,184,148,0.15)":"transparent", color:r.followers && r.views/r.followers>=VIRAL_THRESHOLD?COLORS.green:COLORS.textDim }}>{r.followers?(r.views/r.followers).toFixed(2):"—"}</span></td><td style={{ ...S.td, maxWidth:200, color:COLORS.textDim, fontSize:12 }} title={r.caption}>{r.caption?.slice(0,60)}{r.caption?.length>60?"…":""}</td></RowHover>))}</tbody></table></div></>);
+  const filtered = useMemo(() => {
+    let d = [...data];
+    if (search) {
+      const q = search.toLowerCase();
+      d = d.filter((r) =>
+        columns.some((c) => {
+          const v = r[c.key];
+          return v !== null && v !== undefined && String(v).toLowerCase().includes(q);
+        })
+      );
+    }
+    if (sortKey) {
+      d.sort((a, b) => {
+        let va = a[sortKey], vb = b[sortKey];
+        const na = Number(va), nb = Number(vb);
+        if (!isNaN(na) && !isNaN(nb)) return sortDir === "desc" ? nb - na : na - nb;
+        va = String(va || ""); vb = String(vb || "");
+        return sortDir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb);
+      });
+    }
+    return d;
+  }, [data, sortKey, sortDir, search, columns]);
 
-  const renderMarques = () => (<><div style={S.kpiGrid}><KPI label="Total marques (≥3 vidéos)" value={marquesData.length} color={COLORS.blue} /><KPI label="Moy. vidéos/semaine" value={marquesData.length?(marquesData.reduce((s,m)=>s+parseFloat(m.avgVideosPerWeek),0)/marquesData.length).toFixed(1):"—"} color={COLORS.green} /><KPI label="Total vidéos actu chaude" value={fmt(marquesData.reduce((s,m)=>s+m.nbHot,0))} color={COLORS.red} /><KPI label="Total vidéos froides" value={fmt(marquesData.reduce((s,m)=>s+m.nbCold,0))} color={COLORS.blue} /></div>
-    <div style={S.tableWrap}><table style={S.table}><thead><tr><th style={S.th}>#</th><th style={S.th}>Marque</th><th style={S.th}>Vidéos</th><th style={S.th}>Moy./sem</th><th style={S.th}>Vues totales</th><th style={S.th}>Moy. vues</th><th style={S.th}>Likes</th><th style={S.th}>Com.</th><th style={S.th}>Part.</th><th style={S.th}>Saves</th><th style={S.th}>Followers</th><th style={S.th}>ER moy.</th><th style={S.th}>Virales</th><th style={S.th}>🔥 Chaud</th><th style={S.th}>❄️ Froid</th></tr></thead>
-    <tbody>{marquesData.map((m, i) => (<RowHover key={m.owner} i={i}><td style={{ ...S.td, color:COLORS.textMuted }}>{i+1}</td><td style={{ ...S.td, fontWeight:700 }}>{m.owner}</td><td style={S.td}>{m.nbVideos}</td><td style={S.td}><span style={{ ...S.badge, background:"rgba(0,184,148,0.15)", color:COLORS.green }}>{m.avgVideosPerWeek}</span></td><td style={{ ...S.td, fontWeight:700 }}>{fmt(m.totalViews)}</td><td style={S.td}>{fmt(m.avgViewsPerVideo)}</td><td style={S.td}>{fmt(m.totalLikes)}</td><td style={S.td}>{fmt(m.totalComments)}</td><td style={S.td}>{fmt(m.totalShares)}</td><td style={S.td}>{fmt(m.totalSaves)}</td><td style={S.td}>{fmt(m.avgFollowers)}</td><td style={S.td}>{fmtPct(m.avgER)}</td><td style={S.td}><span style={{ ...S.badge, background:"rgba(253,203,110,0.15)", color:COLORS.orange }}>{m.nbVirales}</span></td><td style={S.td}><span style={{ ...S.badge, background:"rgba(225,112,85,0.15)", color:COLORS.red }}>{m.nbHot}</span></td><td style={S.td}><span style={{ ...S.badge, background:"rgba(116,185,255,0.15)", color:COLORS.blue }}>{m.nbCold}</span></td></RowHover>))}</tbody></table></div></>);
-
-  const renderFroid = () => (<>
-    <div style={S.infoBanner}>❄️ Contenu <strong style={{ color:COLORS.blue }}>intemporel</strong> : vidéos virales hors actu chaude (politique, guerres, faits divers, résultats sportifs, décès, procès, municipales, crues/inondations). <strong style={{ color:COLORS.white }}>{froidRows.length} vidéos</strong> sur {totalViraux} virales. Règle : en cas de doute → FROID.</div>
-    <div style={S.kpiGrid}><KPI label="❄️ Froid" value={froidRows.length} color={COLORS.blue} /><KPI label="🏷️ Comptes" value={new Set(froidRows.map((r)=>r.owner)).size} color={COLORS.accentLight} /><KPI label="👁 Vues moy." value={fmt(Math.round(_.meanBy(froidRows,"views")||0))} color={COLORS.green} /><KPI label="🔥 Chaud exclu" value={totalChaud} color={COLORS.red} /></div>
-    <div style={S.tableWrap}><table style={S.table}><thead><tr><th style={S.th}>#</th><th style={S.th}>Date</th><th style={S.th}>Semaine</th><th style={S.th}>Compte</th><SortHeader col="views" label="Vues" /><SortHeader col="likes" label="Likes" /><SortHeader col="comments" label="Com." /><th style={S.th}>Ratio V/F</th><th style={S.th}>Caption</th></tr></thead>
-    <tbody>{froidRows.map((r, i) => (<RowHover key={r.url+i} i={i}><td style={{ ...S.td, color:COLORS.textMuted }}>{i+1}</td><td style={S.td}>{fmtDate(r.date)}</td><td style={S.td}><span style={{ ...S.badge, background:"rgba(108,92,231,0.15)", color:COLORS.accentLight }}>{getWeekLabel(r.date)}</span></td><td style={{ ...S.td, fontWeight:600 }}><a href={r.url} target="_blank" rel="noopener noreferrer" style={{ color:COLORS.accentLight, textDecoration:"none" }}>{r.owner}</a></td><td style={{ ...S.td, fontWeight:700 }}>{fmt(r.views)}</td><td style={S.td}>{fmt(r.likes)}</td><td style={S.td}>{fmt(r.comments)}</td><td style={S.td}><span style={{ ...S.badge, background:"rgba(116,185,255,0.15)", color:COLORS.blue }}>{r.followers?(r.views/r.followers).toFixed(2):"—"}</span></td><td style={{ ...S.td, maxWidth:220, color:COLORS.textDim, fontSize:12 }} title={r.caption}>{r.caption?.slice(0,70)}{r.caption?.length>70?"…":""}</td></RowHover>))}</tbody></table></div></>);
-
-  const renderViraux = () => (<><div style={S.filterBar}><span style={{ fontWeight:700, fontSize:13, color:COLORS.textDim }}>Filtre :</span>
-    {["froid","chaud","tous"].map((f) => (<button key={f} style={{ ...S.btnSmall, background:viralFilter===f?COLORS.accent:COLORS.card, color:viralFilter===f?COLORS.white:COLORS.textDim, border:`1px solid ${COLORS.border}` }} onClick={() => setViralFilter(f)}>{f==="froid"?"❄️ Froid":f==="chaud"?"🔥 Chaud":"📊 Tous"}</button>))}
-    <span style={{ fontSize:12, color:COLORS.textMuted, marginLeft:8 }}>{viraux.length} vidéos</span></div>
-    <div style={S.tableWrap}><table style={S.table}><thead><tr><th style={S.th}>#</th><th style={S.th}>Date</th><th style={S.th}>Semaine</th><th style={S.th}>Compte</th><SortHeader col="views" label="Vues" /><SortHeader col="likes" label="Likes" /><SortHeader col="comments" label="Com." /><th style={S.th}>Ratio V/F</th><th style={S.th}>Type</th><th style={S.th}>Caption</th><th style={S.th}>Action</th></tr></thead>
-    <tbody>{viraux.map((r, i) => { const hot = isHotLive(r); return (<RowHover key={r.url+i} i={i} hot={hot}><td style={{ ...S.td, color:COLORS.textMuted }}>{i+1}</td><td style={S.td}>{fmtDate(r.date)}</td><td style={S.td}><span style={{ ...S.badge, background:"rgba(108,92,231,0.15)", color:COLORS.accentLight }}>{getWeekLabel(r.date)}</span></td><td style={{ ...S.td, fontWeight:600 }}><a href={r.url} target="_blank" rel="noopener noreferrer" style={{ color:COLORS.accentLight, textDecoration:"none" }}>{r.owner}</a></td><td style={{ ...S.td, fontWeight:700 }}>{fmt(r.views)}</td><td style={S.td}>{fmt(r.likes)}</td><td style={S.td}>{fmt(r.comments)}</td><td style={S.td}><span style={{ ...S.badge, background:"rgba(0,184,148,0.15)", color:COLORS.green }}>{r.followers?(r.views/r.followers).toFixed(2):"—"}</span></td><td style={S.td}><span style={{ ...S.badge, background:hot?"rgba(225,112,85,0.15)":"rgba(116,185,255,0.15)", color:hot?COLORS.red:COLORS.blue }}>{hot?"🔥 Chaud":"❄️ Froid"}</span></td><td style={{ ...S.td, maxWidth:180, color:COLORS.textDim, fontSize:12 }} title={r.caption}>{r.caption?.slice(0,50)}{r.caption?.length>50?"…":""}</td><td style={S.td}><button style={{ ...S.btnSmall, background:hot?"rgba(0,184,148,0.15)":"rgba(225,112,85,0.15)", color:hot?COLORS.green:COLORS.red }} title={hot?"Remettre en froid":"Marquer comme chaud"} onClick={() => toggleHot(r.url)}>{hot?"↩️":"✕"}</button></td></RowHover>); })}</tbody></table></div></>);
-
-  const renderGenericTable = (rows, label) => (<><div style={S.kpiGrid}><KPI label={`Total ${label}`} value={rows.length} color={COLORS.orange} /></div>
-    <div style={S.tableWrap}><table style={S.table}><thead><tr><th style={S.th}>#</th><th style={S.th}>Date</th><th style={S.th}>Semaine</th><th style={S.th}>Compte</th><SortHeader col="views" label="Vues" /><SortHeader col="likes" label="Likes" /><th style={S.th}>Ratio V/F</th><th style={S.th}>Caption</th></tr></thead>
-    <tbody>{rows.map((r, i) => (<RowHover key={r.url+i} i={i}><td style={{ ...S.td, color:COLORS.textMuted }}>{i+1}</td><td style={S.td}>{fmtDate(r.date)}</td><td style={S.td}><span style={{ ...S.badge, background:"rgba(108,92,231,0.15)", color:COLORS.accentLight }}>{getWeekLabel(r.date)}</span></td><td style={{ ...S.td, fontWeight:600 }}><a href={r.url} target="_blank" rel="noopener noreferrer" style={{ color:COLORS.accentLight, textDecoration:"none" }}>{r.owner}</a></td><td style={{ ...S.td, fontWeight:700 }}>{fmt(r.views)}</td><td style={S.td}>{fmt(r.likes)}</td><td style={S.td}>{r.followers?(r.views/r.followers).toFixed(2):"—"}</td><td style={{ ...S.td, maxWidth:240, color:COLORS.textDim, fontSize:12 }} title={r.caption}>{r.caption?.slice(0,80)}{r.caption?.length>80?"…":""}</td></RowHover>))}</tbody></table></div></>);
-
-  return (<div style={S.page}><div style={S.container}>
-    <div style={S.header}><div style={S.title}>Social Media Dashboard</div><div style={S.subtitle}>{platform === "tiktok" ? "TikTok" : "Instagram"} — {data.length} contenus chargés<span style={{ ...S.platformBadge, background:platform==="tiktok"?"rgba(0,0,0,0.4)":"rgba(225,48,108,0.15)", color:platform==="tiktok"?"#fff":"#e1306c" }}>{platform === "tiktok" ? "♪ TikTok" : "📷 Instagram"}</span></div></div>
-
-    <div style={{ ...S.filterBar, justifyContent:"space-between" }}>
-      <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-        <input type="text" placeholder="🔍 Rechercher..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ ...S.select, width:220 }} />
-        <button style={{ ...S.btn, ...S.btnPrimary, fontSize:12, padding:"8px 16px" }} onClick={() => exportExcel(data, platform, "all")}>📥 Export Excel</button>
+  return (
+    <div>
+      <div style={{ marginBottom: 8 }}>
+        <input
+          type="text" placeholder="🔍 Rechercher…" value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 8, color: "#fff", padding: "8px 14px", fontSize: 13, width: "100%",
+            outline: "none",
+          }}
+        />
       </div>
-      <button style={{ ...S.btnSmall, background:"rgba(225,112,85,0.15)", color:COLORS.red, border:`1px solid ${COLORS.border}`, padding:"6px 12px" }} onClick={() => { setData([]); setPlatform(null); setLocalExclude([]); setSearchTerm(""); }}>🔄 Nouveau CSV</button>
+      <div style={{ overflowX: "auto" }}>
+        {/* Header */}
+        <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4, padding: "8px 6px", borderBottom: "1px solid rgba(255,255,255,0.08)", position: "sticky", top: 0, background: "#0f0f13", zIndex: 2 }}>
+          {columns.map((c) => (
+            <div key={c.key} onClick={() => toggle(c.key)}
+              style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", cursor: "pointer", userSelect: "none", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              {c.label} {sortKey === c.key ? (sortDir === "desc" ? "▼" : "▲") : ""}
+            </div>
+          ))}
+        </div>
+        {/* Rows */}
+        <div style={{ maxHeight: 520, overflowY: "auto" }}>
+          {filtered.length === 0 && (
+            <div style={{ padding: 24, textAlign: "center", color: "rgba(255,255,255,0.3)", fontSize: 13 }}>Aucun résultat</div>
+          )}
+          {filtered.map((r, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: gridCols, gap: 4, padding: "7px 6px", borderBottom: "1px solid rgba(255,255,255,0.04)", alignItems: "center", fontSize: 13 }}>
+              {columns.map((c) => {
+                if (c.render) return <div key={c.key} style={{ color: c.color || "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.render(r, onAction)}</div>;
+                const val = r[c.key];
+                return (
+                  <div key={c.key} style={{ color: c.color || "rgba(255,255,255,0.7)", fontWeight: c.bold ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {c.fmt ? fmt(val) : (val ?? "—")}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ marginTop: 6, fontSize: 11, color: "rgba(255,255,255,0.3)" }}>{filtered.length} résultats</div>
     </div>
+  );
+}
 
-    <div style={S.tabs}>{TABS.map((t) => (<button key={t.id} style={{ ...S.tab, ...(activeTab===t.id?S.tabActive:{}) }} onClick={() => setActiveTab(t.id)}>{t.label} ({t.count})</button>))}</div>
+/* ───────────────────────────────────────────
+   KPI CARD
+   ─────────────────────────────────────────── */
 
-    {activeTab === "contenus" && renderContenus()}
-    {activeTab === "marques" && renderMarques()}
-    {activeTab === "froid" && renderFroid()}
-    {activeTab === "viraux" && renderViraux()}
-    {activeTab === "suspects" && renderGenericTable(suspects, "Suspects")}
-    {activeTab === "sponsos" && renderGenericTable(sponsos, "Sponsos")}
+function KpiCard({ label, value, color }) {
+  return (
+    <div style={{ background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: "12px 14px", border: "1px solid rgba(255,255,255,0.06)" }}>
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px" }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: color || "#fff" }}>{value}</div>
+    </div>
+  );
+}
 
-    <div style={S.footer}>© 2026 Clément Dubois — Tous droits réservés</div>
-  </div></div>);
+/* ───────────────────────────────────────────
+   MAIN DASHBOARD
+   ─────────────────────────────────────────── */
+
+export default function Dashboard() {
+  const [rows, setRows] = useState([]);
+  const [page, setPage] = useState("contenus");
+  const [dragOver, setDragOver] = useState(false);
+  const [runtimeExclude, setRuntimeExclude] = useState([]);
+
+  // Combined exclusion list: MANUAL_EXCLUDE + runtime
+  const allExcluded = useMemo(
+    () => [...MANUAL_EXCLUDE, ...runtimeExclude],
+    [runtimeExclude]
+  );
+
+  /* CSV parsing */
+  const handleFiles = useCallback((files) => {
+    const allFiles = Array.from(files).filter((f) => f.name.endsWith(".csv"));
+    if (!allFiles.length) return;
+    let pending = allFiles.length;
+    const newRows = [];
+    allFiles.forEach((file) => {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (res) => {
+          res.data.forEach((row) => {
+            const platform = detectPlatform(row);
+            if (platform !== "unknown") newRows.push(mapRow(row));
+          });
+          pending--;
+          if (pending === 0) setRows((prev) => [...prev, ...newRows]);
+        },
+      });
+    });
+  }, []);
+
+  const onDrop = useCallback((e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }, [handleFiles]);
+  const onDragOver = useCallback((e) => { e.preventDefault(); setDragOver(true); }, []);
+  const onDragLeave = useCallback(() => setDragOver(false), []);
+
+  /* Hot/Cold classification using allExcluded */
+  const classifyRow = useCallback(
+    (r) => {
+      if (!r.url) return "chaud";
+      return allExcluded.some((u) => r.url.includes(u)) ? "froid" : "chaud";
+    },
+    [allExcluded]
+  );
+
+  /* Engagement rate for a row */
+  const engRate = (r) => {
+    const v = Number(r.views) || 0;
+    const l = Number(r.likes) || 0;
+    const c = Number(r.comments) || 0;
+    return v > 0 ? (l + c) / v : 0;
+  };
+
+  /* Render engagement */
+  const renderEng = (r) => {
+    const e = engRate(r);
+    const color = e > 0.05 ? "#34d399" : e > 0.02 ? "#fbbf24" : "#f87171";
+    return <span style={{ color }}>{fmtPct(e)}</span>;
+  };
+
+  /* Link column */
+  const linkCol = {
+    key: "_link", label: "🔗", render: (r) =>
+      r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "#60a5fa", textDecoration: "none", fontSize: 12 }}>↗</a> : "—",
+  };
+
+  /* ───── COMPUTED DATA ───── */
+  const computed = useMemo(() => {
+    const byCompte = _.groupBy(rows, "compte");
+
+    /* BRANDS */
+    const brandsArr = Object.entries(byCompte).map(([compte, vids]) => {
+      const views = vids.map((v) => Number(v.views) || 0);
+      const avgViews = views.length ? _.mean(views) : 0;
+      const totalViews = _.sum(views);
+      const totalLikes = _.sumBy(vids, (v) => Number(v.likes) || 0);
+      const totalComments = _.sumBy(vids, (v) => Number(v.comments) || 0);
+      const engagements = vids.map((v) => engRate(v));
+      const avgEng = engagements.length ? _.mean(engagements) : 0;
+
+      // Distinct weeks
+      const weeks = new Set(vids.map((v) => getWeekLabel(v.date)).filter(Boolean));
+      const nbWeeks = weeks.size || 1;
+      const avgVidsPerWeek = vids.length / nbWeeks;
+
+      // Hot/cold counts
+      const nbChaud = vids.filter((v) => classifyRow(v) === "chaud").length;
+      const nbFroid = vids.filter((v) => classifyRow(v) === "froid").length;
+
+      // Viral count (views > 2.5x avg)
+      const nbViral = vids.filter((v) => (Number(v.views) || 0) > avgViews * 2.5).length;
+
+      const platforms = [...new Set(vids.map((v) => v.platform))];
+
+      return {
+        compte, nbVideos: vids.length, avgViews: Math.round(avgViews), totalViews,
+        totalLikes, totalComments, avgEng, nbViral, vids, platforms,
+        nbWeeks, avgVidsPerWeek: Math.round(avgVidsPerWeek * 10) / 10,
+        nbChaud, nbFroid,
+      };
+    }).filter((b) => b.nbVideos >= 3).sort((a, b) => b.totalViews - a.totalViews);
+
+    /* VIRAUX: views > 2.5x account average */
+    const viralArr = [];
+    brandsArr.forEach((b) => {
+      b.vids.forEach((v) => {
+        if ((Number(v.views) || 0) > b.avgViews * 2.5) {
+          viralArr.push({ ...v, avgCompte: b.avgViews, ratio: b.avgViews > 0 ? ((Number(v.views) || 0) / b.avgViews).toFixed(1) : "—", hotCold: classifyRow(v) });
+        }
+      });
+    });
+    viralArr.sort((a, b) => (Number(b.views) || 0) - (Number(a.views) || 0));
+
+    /* SUSPECTS: views > 1.5x avg AND engagement < 50% of avg */
+    const suspectArr = [];
+    brandsArr.forEach((b) => {
+      const engagements = b.vids.map((v) => engRate(v));
+      const avgEngBrand = engagements.length ? _.mean(engagements) : 0;
+      const viewThreshold = b.avgViews * 1.5;
+      const engThreshold = avgEngBrand * 0.5;
+      b.vids.forEach((v) => {
+        const vw = Number(v.views) || 0;
+        const eng = engRate(v);
+        if (vw >= viewThreshold && eng <= engThreshold) {
+          suspectArr.push({
+            ...v, avgCompte: Math.round(b.avgViews), avgEngCompte: avgEngBrand, eng,
+            ratioVues: b.avgViews > 0 ? (vw / b.avgViews).toFixed(1) : "—",
+            ratioEng: avgEngBrand > 0 ? (eng / avgEngBrand).toFixed(1) : "—",
+          });
+        }
+      });
+    });
+    suspectArr.sort((a, b) => (Number(b.views) || 0) - (Number(a.views) || 0));
+
+    /* SPONSOS */
+    const sponsoRows = rows.filter((r) => {
+      const cap = (r.caption || "").toLowerCase();
+      const hasPaid = r.isPaid && r.isPaid !== "false" && r.isPaid !== "0" && r.isPaid !== false;
+      return hasPaid || SPONSO_KEYWORDS.some((k) => cap.includes(k));
+    });
+
+    return { brandsArr, viralArr, suspectArr, sponsoRows };
+  }, [rows, classifyRow]);
+
+  const { brandsArr, viralArr, suspectArr, sponsoRows } = computed;
+
+  /* Global stats */
+  const tot = (k) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+  const nbInsta = rows.filter((r) => r.platform === "instagram").length;
+  const nbTiktok = rows.filter((r) => r.platform === "tiktok").length;
+
+  /* TABS */
+  const TABS = [
+    ["contenus", "📝 Contenus"],
+    ["marques", "🏢 Marques"],
+    ["viraux", "🔥 Viraux"],
+    ["suspects", "🤔 Suspects"],
+    ["sponso", "🤝 Sponsos"],
+  ];
+
+  /* ───── EXPORT EXCEL ───── */
+  const exportExcel = () => {
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1: Contenus
+    const contenusData = rows.map((r) => ({
+      Plateforme: r.platform === "tiktok" ? "TikTok" : "Instagram",
+      Compte: r.compte,
+      Date: fmtDate(r.date),
+      Semaine: getWeekLabel(r.date),
+      Type: r.type,
+      Caption: r.caption?.slice(0, 200),
+      Vues: Number(r.views) || 0,
+      Likes: Number(r.likes) || 0,
+      Commentaires: Number(r.comments) || 0,
+      Partages: Number(r.shares) || 0,
+      "Taux Engagement": engRate(r),
+      "Chaud/Froid": classifyRow(r),
+      URL: r.url,
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(contenusData), "Contenus");
+
+    // Sheet 2: Marques
+    const marquesData = brandsArr.map((b) => ({
+      Compte: b.compte,
+      Plateformes: b.platforms.join(", "),
+      "Nb Vidéos": b.nbVideos,
+      "Moy. Vidéos/Semaine": b.avgVidsPerWeek,
+      "Vues Moy.": b.avgViews,
+      "Vues Total": b.totalViews,
+      "Taux Engage. Moy.": b.avgEng,
+      "Vidéos Virales": b.nbViral,
+      "Vidéos Chaudes": b.nbChaud,
+      "Vidéos Froides": b.nbFroid,
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(marquesData), "Marques");
+
+    // Sheet 3: Viraux
+    const virauxData = viralArr.map((r) => ({
+      Compte: r.compte, Date: fmtDate(r.date), Caption: r.caption?.slice(0, 200),
+      Vues: Number(r.views) || 0, "Moy Compte": r.avgCompte, Ratio: r.ratio,
+      "Chaud/Froid": r.hotCold, URL: r.url,
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(virauxData), "Viraux");
+
+    // Sheet 4: Suspects
+    const suspectsData = suspectArr.map((r) => ({
+      Compte: r.compte, Date: fmtDate(r.date), Caption: r.caption?.slice(0, 200),
+      Vues: Number(r.views) || 0, "Moy Compte": r.avgCompte,
+      "Ratio Vues": r.ratioVues, "Ratio Engage.": r.ratioEng, URL: r.url,
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(suspectsData), "Suspects");
+
+    // Sheet 5: Sponsos
+    const sponsosData = sponsoRows.map((r) => ({
+      Compte: r.compte, Date: fmtDate(r.date), Caption: r.caption?.slice(0, 200),
+      Vues: Number(r.views) || 0, Likes: Number(r.likes) || 0,
+      Commentaires: Number(r.comments) || 0, URL: r.url,
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sponsosData), "Sponsos");
+
+    XLSX.writeFile(wb, "social-media-dashboard.xlsx");
+  };
+
+  /* ───── VIRAL FILTER (chaud / froid) ───── */
+  const [viralFilter, setViralFilter] = useState("all"); // "all" | "chaud" | "froid"
+  const filteredViraux = useMemo(() => {
+    if (viralFilter === "all") return viralArr;
+    return viralArr.filter((r) => r.hotCold === viralFilter);
+  }, [viralArr, viralFilter]);
+
+  /* Toggle exclude action for Viraux */
+  const handleViralAction = (r, action) => {
+    if (action === "exclude") {
+      if (r.url && !runtimeExclude.includes(r.url)) {
+        setRuntimeExclude((prev) => [...prev, r.url]);
+      }
+    } else if (action === "restore") {
+      setRuntimeExclude((prev) => prev.filter((u) => u !== r.url));
+    }
+  };
+
+  /* ───────── RENDER ───────── */
+  return (
+    <div style={{
+      minHeight: "100vh", background: "#0a0a0f", color: "#fff",
+      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    }}>
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 16px" }}>
+
+        {/* HEADER */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>📊 Social Media Dashboard</h1>
+            {rows.length > 0 && (
+              <p style={{ margin: "4px 0 0", fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
+                {rows.length} contenus — {nbInsta > 0 && `📸 ${nbInsta} Insta`}{nbInsta > 0 && nbTiktok > 0 && " · "}{nbTiktok > 0 && `🎵 ${nbTiktok} TikTok`}
+              </p>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {rows.length > 0 && (
+              <>
+                <button onClick={exportExcel} style={{
+                  background: "rgba(52,211,153,0.15)", border: "1px solid rgba(52,211,153,0.3)",
+                  color: "#34d399", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600,
+                }}>
+                  📥 Export Excel
+                </button>
+                <label style={{
+                  background: "rgba(96,165,250,0.15)", border: "1px solid rgba(96,165,250,0.3)",
+                  color: "#60a5fa", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600,
+                }}>
+                  ➕ Ajouter CSV
+                  <input type="file" accept=".csv" multiple hidden onChange={(e) => handleFiles(e.target.files)} />
+                </label>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* DROP ZONE (when empty) */}
+        {rows.length === 0 && (
+          <div
+            onDrop={onDrop} onDragOver={onDragOver} onDragLeave={onDragLeave}
+            style={{
+              border: `2px dashed ${dragOver ? "#60a5fa" : "rgba(255,255,255,0.15)"}`,
+              borderRadius: 16, padding: 60, textAlign: "center",
+              background: dragOver ? "rgba(96,165,250,0.06)" : "rgba(255,255,255,0.02)",
+              transition: "all 0.2s",
+            }}
+          >
+            <p style={{ fontSize: 40, margin: "0 0 12px" }}>📂</p>
+            <p style={{ fontSize: 16, fontWeight: 600, color: "rgba(255,255,255,0.7)", margin: "0 0 8px" }}>
+              Glisse tes fichiers CSV ici
+            </p>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: "0 0 16px" }}>
+              Instagram (Apify) + TikTok — détection automatique
+            </p>
+            <label style={{
+              background: "rgba(96,165,250,0.2)", border: "1px solid rgba(96,165,250,0.3)",
+              color: "#60a5fa", padding: "10px 24px", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 600,
+            }}>
+              Parcourir…
+              <input type="file" accept=".csv" multiple hidden onChange={(e) => handleFiles(e.target.files)} />
+            </label>
+          </div>
+        )}
+
+        {/* Hidden drop zone when data loaded */}
+        {rows.length > 0 && (
+          <div onDrop={onDrop} onDragOver={onDragOver} onDragLeave={onDragLeave}
+            style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: dragOver ? 999 : -1, background: dragOver ? "rgba(96,165,250,0.08)" : "transparent", pointerEvents: dragOver ? "auto" : "none" }}>
+            {dragOver && <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", fontSize: 20, fontWeight: 700, color: "#60a5fa" }}>Dépose tes CSV ici</div>}
+          </div>
+        )}
+
+        {/* TABS */}
+        {rows.length > 0 && (
+          <>
+            <div style={{ display: "flex", gap: 4, marginBottom: 16, overflowX: "auto", paddingBottom: 4 }}>
+              {TABS.map(([k, label]) => (
+                <button key={k} onClick={() => setPage(k)} style={{
+                  padding: "8px 16px", borderRadius: 8, fontSize: 13, fontWeight: page === k ? 700 : 500,
+                  background: page === k ? "rgba(255,255,255,0.1)" : "transparent",
+                  color: page === k ? "#fff" : "rgba(255,255,255,0.45)",
+                  border: page === k ? "1px solid rgba(255,255,255,0.15)" : "1px solid transparent",
+                  cursor: "pointer", whiteSpace: "nowrap", transition: "all 0.15s",
+                }}>
+                  {label}
+                  {k === "viraux" && <span style={{ marginLeft: 6, padding: "2px 7px", borderRadius: 10, background: "rgba(251,191,36,0.2)", color: "#fbbf24", fontSize: 11 }}>{viralArr.length}</span>}
+                  {k === "suspects" && <span style={{ marginLeft: 6, padding: "2px 7px", borderRadius: 10, background: "rgba(248,113,113,0.2)", color: "#f87171", fontSize: 11 }}>{suspectArr.length}</span>}
+                  {k === "sponso" && <span style={{ marginLeft: 6, padding: "2px 7px", borderRadius: 10, background: "rgba(52,211,153,0.2)", color: "#34d399", fontSize: 11 }}>{sponsoRows.length}</span>}
+                </button>
+              ))}
+            </div>
+
+            {/* KPI ROW */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8, marginBottom: 16 }}>
+              <KpiCard label="Total Vues" value={fmt(tot("views"))} color="#818cf8" />
+              <KpiCard label="Total Likes" value={fmt(tot("likes"))} color="#f472b6" />
+              <KpiCard label="Total Com." value={fmt(tot("comments"))} color="#60a5fa" />
+              <KpiCard label="Marques (≥3)" value={brandsArr.length} color="#fbbf24" />
+              <KpiCard label="Viraux" value={viralArr.length} color="#f59e0b" />
+              <KpiCard label="Suspects" value={suspectArr.length} color="#f87171" />
+            </div>
+
+            {/* ===== CONTENUS ===== */}
+            {page === "contenus" && (
+              <SortTable
+                data={rows}
+                gridCols="30px 90px 80px 65px 35px 1fr 75px 60px 55px 70px 35px"
+                columns={[
+                  { key: "platform", label: "🌐", render: (r) => platformIcon(r.platform) },
+                  { key: "compte", label: "Compte", bold: true, color: "#fff" },
+                  { key: "date", label: "Date", render: (r) => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
+                  { key: "_week", label: "Semaine", render: (r) => {
+                    const wl = getWeekLabel(r.date);
+                    const wr = getWeekRange(r.date);
+                    return wl ? <span title={wr} style={{ color: "rgba(255,255,255,0.4)", fontSize: 12 }}>{wl}</span> : "—";
+                  }, color: "rgba(255,255,255,0.4)" },
+                  { key: "type", label: "", render: (r) => typeIcon(r.type) },
+                  { key: "caption", label: "Caption", color: "rgba(255,255,255,0.75)", render: (r) =>
+                    r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 110)}</a> : r.caption?.slice(0, 110),
+                  },
+                  { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
+                  { key: "likes", label: "Likes", fmt: true, color: "#f472b6" },
+                  { key: "comments", label: "Com.", fmt: true, color: "#60a5fa" },
+                  { key: "engagement", label: "Engage.", render: renderEng, color: "#34d399" },
+                  linkCol,
+                ]}
+              />
+            )}
+
+            {/* ===== MARQUES ===== */}
+            {page === "marques" && (
+              <SortTable
+                data={brandsArr}
+                gridCols="1fr 55px 65px 80px 80px 85px 85px 70px 60px 55px"
+                columns={[
+                  { key: "compte", label: "Compte", bold: true, color: "#fff", render: (b) => (
+                    <span>{b.platforms.map((p) => platformIcon(p)).join("")} {b.compte}</span>
+                  )},
+                  { key: "nbVideos", label: "Vidéos", bold: true, color: "#fff" },
+                  { key: "avgVidsPerWeek", label: "Moy./Sem.", render: (b) => (
+                    <span style={{ color: "#a78bfa" }}>{b.avgVidsPerWeek}</span>
+                  ), color: "#a78bfa" },
+                  { key: "avgViews", label: "Vues Moy.", fmt: true, color: "#818cf8" },
+                  { key: "totalViews", label: "Vues Total", fmt: true, color: "#818cf8" },
+                  { key: "avgEng", label: "Engage. Moy.", render: (b) => fmtPct(b.avgEng), color: "#34d399" },
+                  { key: "nbViral", label: "> 2.5x moy.", render: (b) => (
+                    <span>
+                      {b.nbViral > 0 ? <span style={{ color: "#fbbf24" }}>{b.nbViral}</span> : <span style={{ color: "rgba(255,255,255,0.25)" }}>0</span>}
+                      {b.nbViral > 0 && b.nbVideos > 0 && <span style={{ color: "rgba(255,255,255,0.3)", marginLeft: 4, fontSize: 11 }}>({Math.round(b.nbViral / b.nbVideos * 100)}%)</span>}
+                    </span>
+                  ), color: "#fbbf24" },
+                  { key: "nbChaud", label: "🔥 Chaud", render: (b) => (
+                    <span style={{ color: "#f59e0b" }}>{b.nbChaud}</span>
+                  ), color: "#f59e0b" },
+                  { key: "nbFroid", label: "❄️ Froid", render: (b) => (
+                    <span style={{ color: "#60a5fa" }}>{b.nbFroid}</span>
+                  ), color: "#60a5fa" },
+                ]}
+              />
+            )}
+
+            {/* ===== VIRAUX ===== */}
+            {page === "viraux" && (<>
+              {/* Filter bar */}
+              <div style={{ display: "flex", gap: 6, marginBottom: 12, alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginRight: 4 }}>Filtre :</span>
+                {[["all", "Tous"], ["chaud", "🔥 Chaud"], ["froid", "❄️ Froid"]].map(([k, label]) => (
+                  <button key={k} onClick={() => setViralFilter(k)} style={{
+                    padding: "5px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer",
+                    background: viralFilter === k ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)",
+                    color: viralFilter === k ? "#fff" : "rgba(255,255,255,0.45)",
+                    border: viralFilter === k ? "1px solid rgba(255,255,255,0.2)" : "1px solid rgba(255,255,255,0.06)",
+                  }}>
+                    {label}
+                  </button>
+                ))}
+                {runtimeExclude.length > 0 && (
+                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginLeft: 8 }}>
+                    ({runtimeExclude.length} exclu(es) manuellement)
+                  </span>
+                )}
+              </div>
+              <SortTable
+                data={filteredViraux}
+                gridCols="30px 90px 75px 1fr 75px 70px 55px 55px 35px"
+                onAction={handleViralAction}
+                columns={[
+                  { key: "platform", label: "🌐", render: (r) => platformIcon(r.platform) },
+                  { key: "compte", label: "Compte", bold: true, color: "#fff" },
+                  { key: "date", label: "Date", render: (r) => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
+                  { key: "caption", label: "Caption", color: "rgba(255,255,255,0.75)", render: (r) =>
+                    r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 100)}</a> : r.caption?.slice(0, 100),
+                  },
+                  { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
+                  { key: "avgCompte", label: "Moy. Compte", fmt: true, color: "rgba(255,255,255,0.4)" },
+                  { key: "ratio", label: "Ratio", render: (r) => <span style={{ color: "#fbbf24" }}>{r.ratio}x</span>, color: "#fbbf24" },
+                  { key: "hotCold", label: "🔥/❄️", render: (r, onAction) => {
+                    const isFroid = r.hotCold === "froid";
+                    return (
+                      <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ color: isFroid ? "#60a5fa" : "#f59e0b" }}>{isFroid ? "❄️" : "🔥"}</span>
+                        {r.url && (
+                          <button
+                            onClick={() => onAction && onAction(r, isFroid ? "restore" : "exclude")}
+                            title={isFroid ? "Reclasser en chaud" : "Exclure (froid)"}
+                            style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer", fontSize: 14, padding: 0 }}
+                          >
+                            {isFroid ? "↩️" : "✕"}
+                          </button>
+                        )}
+                      </span>
+                    );
+                  }},
+                  linkCol,
+                ]}
+              />
+            </>)}
+
+            {/* ===== SUSPECTS ===== */}
+            {page === "suspects" && (
+              <SortTable
+                data={suspectArr}
+                gridCols="30px 90px 75px 1fr 75px 70px 65px 65px 35px"
+                columns={[
+                  { key: "platform", label: "🌐", render: (r) => platformIcon(r.platform) },
+                  { key: "compte", label: "Compte", bold: true, color: "#fff" },
+                  { key: "date", label: "Date", render: (r) => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
+                  { key: "caption", label: "Caption", color: "rgba(255,255,255,0.75)", render: (r) =>
+                    r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 100)}</a> : r.caption?.slice(0, 100),
+                  },
+                  { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
+                  { key: "avgCompte", label: "Moy. Compte", fmt: true, color: "rgba(255,255,255,0.4)" },
+                  { key: "ratioVues", label: "Ratio Vues", render: (r) => <span style={{ color: "#f87171" }}>{r.ratioVues}x</span>, color: "#f87171" },
+                  { key: "ratioEng", label: "Ratio Eng.", render: (r) => <span style={{ color: "#f87171" }}>{r.ratioEng}x</span>, color: "#f87171" },
+                  linkCol,
+                ]}
+              />
+            )}
+
+            {/* ===== SPONSOS ===== */}
+            {page === "sponso" && (<>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, marginBottom: 12 }}>
+                <KpiCard label="🤝 Contenus sponso" value={sponsoRows.length} color="#34d399" />
+                <KpiCard label="🏢 Comptes" value={_.uniqBy(sponsoRows, "compte").length} color="#a78bfa" />
+                <KpiCard label="👁 Vues moy." value={fmt(sponsoRows.length ? Math.round(_.meanBy(sponsoRows, (r) => Number(r.views) || 0)) : 0)} color="#818cf8" />
+                <KpiCard label="💬 Engage. moy." value={fmtPct(sponsoRows.length ? _.meanBy(sponsoRows, (r) => engRate(r)) : 0)} color="#34d399" />
+              </div>
+              <SortTable
+                data={sponsoRows}
+                gridCols="30px 90px 75px 35px 1fr 75px 60px 55px 70px 35px"
+                columns={[
+                  { key: "platform", label: "🌐", render: (r) => platformIcon(r.platform) },
+                  { key: "compte", label: "Compte", bold: true, color: "#fff" },
+                  { key: "date", label: "Date", render: (r) => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
+                  { key: "type", label: "", render: (r) => typeIcon(r.type) },
+                  { key: "caption", label: "Caption", color: "rgba(255,255,255,0.75)", render: (r) =>
+                    r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 110)}</a> : r.caption?.slice(0, 110),
+                  },
+                  { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
+                  { key: "likes", label: "Likes", fmt: true, color: "#f472b6" },
+                  { key: "comments", label: "Com.", fmt: true, color: "#60a5fa" },
+                  { key: "engagement", label: "Engage.", render: renderEng, color: "#34d399" },
+                  linkCol,
+                ]}
+              />
+            </>)}
+          </>
+        )}
+
+        {/* FOOTER */}
+        <div style={{ marginTop: 40, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.08)", textAlign: "center" }}>
+          <p style={{ color: "rgba(255,255,255,0.25)", fontSize: 11, margin: 0 }}>
+            © 2026 Clément Dubois — Tous droits réservés
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
