@@ -31,6 +31,118 @@ function getWeekLabel(dateStr) {
   return "S" + w;
 }
 
+/* ──────────────────────────────────────────────────────────────
+   CLASSIFICATION AUTOMATIQUE CHAUD / FROID PAR MOTS-CLÉS
+   
+   Règles :
+   CHAUD = politique, faits divers, actu internationale, guerres,
+           décès, procès, municipales, résultats sportifs, catastrophes
+   FROID = tout le reste (lifestyle, culture, témoignages intemporels,
+           recettes, science, humour)
+   En cas de doute → FROID
+   
+   Priorité de classification :
+   1. URL dans MANUAL_EXCLUDE → CHAUD (override manuel)
+   2. Mots-clés détectés dans la caption → CHAUD
+   3. Sinon → FROID
+   ────────────────────────────────────────────────────────────── */
+
+const HOT_KEYWORDS = [
+  /* ── Politique ── */
+  "macron", "élection", "élections", "municipales", "législatives",
+  "assemblée nationale", "assemblée", "sénat", "gouvernement", "ministre",
+  "premier ministre", "réforme", "manifestation", "grève", "grèves",
+  "politique", "vote", "scrutin", "président de la république",
+  "parti politique", "lfi", "rassemblement national",
+  "renaissance", "nupes", "député", "députés", "remaniement",
+  "motion de censure", "49.3", "dissolution", "référendum",
+  "extrême droite", "extrême gauche", "mélenchon", "le pen",
+  "bardella", "attal", "borne", "bayrou",
+  
+  /* ── Faits divers / Justice ── */
+  "meurtre", "meurtrier", "homicide", "assassinat", "assassin",
+  "agression", "agresseur", "viol", "violeur", "procès", "tribunal",
+  "garde à vue", "garde a vue", "mis en examen", "condamné", "condamnation",
+  "arrêté", "arrestation", "interpellé", "interpellation",
+  "suspect", "soupçonné", "enquête", "gendarmerie", "police judiciaire",
+  "crime", "criminel", "enlèvement", "kidnapping", "disparition inquiétante",
+  "fugitif", "cavale", "fusillade", "braquage", "cambriolage",
+  "trafic de drogue", "trafiquant", "narcotrafic", "narcotrafiquant",
+  "féminicide", "infanticide", "pédocriminalité", "pédophile",
+  "terrorisme", "terroriste", "attentat", "radicalisation",
+  "coups de couteau", "poignardé", "blessé par balle",
+  "incarcéré", "prison", "détenu", "évasion",
+  "cour d'assises", "cour d assises", "perpétuité", "récidiviste",
+
+  /* ── Guerre / Actu internationale ── */
+  "ukraine", "gaza", "israël", "israel", "palestine", "palestinien",
+  "russie", "guerre", "conflit armé", "bombardement", "missile",
+  "otage", "otages", "hamas", "hezbollah", "poutine", "zelensky",
+  "otan", "offensive", "cessez-le-feu", "cessez le feu",
+  "trump", "biden", "kamala", "sanctions internationales",
+  "syrie", "iran", "corée du nord", "coree du nord", "taïwan", "taiwan",
+  "coup d'état", "coup d etat", "génocide", "massacre",
+  "réfugiés", "migrants", "immigration clandestine",
+  "drone militaire", "frappe aérienne", "frappe aerienne",
+
+  /* ── Décès / Hommages ── */
+  "décès", "deces", "décédé", "decede", "mort de", "est mort",
+  "est décédé", "est decede", "hommage", "funérailles", "funerailles",
+  "obsèques", "obseques", "rip", "repose en paix",
+  "disparition de", "nous quitte", "a perdu la vie",
+
+  /* ── Sport (résultats / actu chaude) ── */
+  "score final", "victoire de", "défaite de", "defaite de",
+  "match nul", "finale", "demi-finale", "demi finale",
+  "quart de finale", "champion", "championnat",
+  "ligue 1", "ligue des champions", "champions league",
+  "euro 2026", "coupe du monde", "coupe de france",
+  "jeux olympiques", "médaille d'or", "médaille d or",
+  "médaille d'argent", "médaille de bronze", "podium",
+  "transfert", "mercato", "ballon d'or", "ballon d or",
+  "éliminatoires", "qualifications",
+  "carton rouge", "penalty", "prolongation",
+
+  /* ── Catastrophes / Météo extrême ── */
+  "inondation", "inondations", "crue", "crues", "décrue",
+  "séisme", "seisme", "tremblement de terre",
+  "incendie", "feux de forêt", "feux de foret",
+  "tempête", "tempete", "ouragan", "cyclone", "typhon",
+  "canicule", "alerte météo", "alerte meteo", "vigilance rouge",
+  "vigilance orange", "tsunami", "éruption volcanique",
+  "glissement de terrain", "avalanche", "tornade",
+  "sécheresse", "secheresse",
+
+  /* ── Accidents / Urgences ── */
+  "accident mortel", "accident de la route", "collision",
+  "déraillement", "crash", "naufrage", "explosion",
+  "effondrement", "éboulement",
+];
+
+/* Normalise un texte pour la comparaison (minuscules, sans accents superflus, espaces nettoyés) */
+const normalizeText = (text) => {
+  if (!text) return "";
+  return text
+    .toLowerCase()
+    .replace(/[\n\r\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+/* Détecte si une caption contient des mots-clés "chaud" */
+const isHotCaption = (caption) => {
+  const normalized = normalizeText(caption);
+  if (!normalized) return false;
+  return HOT_KEYWORDS.some(kw => normalized.includes(kw));
+};
+
+/* Retourne le(s) mot(s)-clé(s) chaud trouvé(s) dans la caption (pour debug/affichage) */
+const getHotKeywords = (caption) => {
+  const normalized = normalizeText(caption);
+  if (!normalized) return [];
+  return HOT_KEYWORDS.filter(kw => normalized.includes(kw));
+};
+
 /* ─── MAP ROW ─── */
 function mapRow(row) {
   const keys = Object.keys(row);
@@ -73,7 +185,7 @@ function mapRow(row) {
   };
 }
 
-/* ─── MANUAL EXCLUDE (chaud URLs) ─── */
+/* ─── MANUAL EXCLUDE (chaud URLs — override manuel, priorité max) ─── */
 const MANUAL_EXCLUDE = [
   "https://www.instagram.com/p/DXEJYTTgP7j/","https://www.instagram.com/p/DWuNt9uCTYP/","https://www.instagram.com/p/DWwDoH2kccQ/",
   "https://www.instagram.com/p/DXE3vlCjxJR/","https://www.instagram.com/p/DXEhh-LEQ4w/","https://www.instagram.com/p/DWtc3aLkWZY/",
@@ -162,13 +274,13 @@ const KPI = ({ items }) => <div style={{ display: "grid", gridTemplateColumns: "
 /* ─── EXPORT BUILDERS ─── */
 const expContenus = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.week || "", r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
 const expMarques = rows => rows.map(b => [b.compte, b.platforms?.join("+"), b.nbVideos, b.avgVidsPerWeek, Math.round(b.avgViews), (b.avgEngagement*100).toFixed(2)+"%", b.nbViral, b.nbChaud, b.nbFroid]);
-const expViraux = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), cleanCap(r.caption), r.views ?? "", r.avgCompte ?? "", r.ratio ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.tempType || "", r.url]; });
+const expViraux = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), cleanCap(r.caption), r.views ?? "", r.avgCompte ?? "", r.ratio ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.tempType || "", r.hotKeywordsFound || "", r.url]; });
 const expSuspects = rows => rows.map(r => [r.platform, r.compte, fmtDate(r.date), cleanCap(r.caption), r.views ?? "", r.ratioVues ?? "", (r.eng*100).toFixed(2)+"%", (r.avgEngCompte*100).toFixed(2)+"%", r.url]);
 const expSponso = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
 
 const hContenus = ["Plateforme","Compte","Date","Semaine","Type","Caption","Vues","Likes","Com.","Engagement","URL"];
 const hMarques = ["Compte","Plateformes","Vid\u00e9os","Moy./Sem.","Moy. vues","Engagement","Virales","Chaud","Froid"];
-const hViraux = ["Plateforme","Compte","Date","Caption","Vues","Moy.","Ratio","Engagement","Type","URL"];
+const hViraux = ["Plateforme","Compte","Date","Caption","Vues","Moy.","Ratio","Engagement","Type","Mots-cl\u00e9s","URL"];
 const hSuspects = ["Plateforme","Compte","Date","Caption","Vues","Ratio","Engagement","Moy. eng.","URL"];
 const hSponso = ["Plateforme","Compte","Date","Type","Caption","Vues","Likes","Com.","Engagement","URL"];
 
@@ -179,6 +291,7 @@ export default function Dashboard() {
   const [files, setFiles] = useState([]);
   const [page, setPage] = useState("contenus");
   const [manualExclude, setManualExclude] = useState(MANUAL_EXCLUDE);
+  const [manualInclude, setManualInclude] = useState([]); // URLs forcées en froid malgré les mots-clés
   const [viralFilter, setViralFilter] = useState("froid");
 
   const loadFile = useCallback((f) => {
@@ -194,6 +307,30 @@ export default function Dashboard() {
 
   const platformCounts = useMemo(() => ({ instagram: rows.filter(r => r.platform === "instagram").length, tiktok: rows.filter(r => r.platform === "tiktok").length }), [rows]);
 
+  /* ─── Classification function ─── */
+  const classifyHotCold = useCallback((row) => {
+    const url = (row.url || "").replace(/\/$/, "");
+    
+    // 1. URL dans manualExclude → CHAUD (override)
+    if (manualExclude.some(u => u.replace(/\/$/, "") === url)) {
+      return { type: "chaud", source: "manuel", keywords: [] };
+    }
+    
+    // 2. URL dans manualInclude → FROID (override inverse)
+    if (manualInclude.some(u => u.replace(/\/$/, "") === url)) {
+      return { type: "froid", source: "manuel", keywords: [] };
+    }
+    
+    // 3. Mots-clés dans la caption → CHAUD
+    const foundKw = getHotKeywords(row.caption);
+    if (foundKw.length > 0) {
+      return { type: "chaud", source: "auto", keywords: foundKw };
+    }
+    
+    // 4. Sinon → FROID
+    return { type: "froid", source: "default", keywords: [] };
+  }, [manualExclude, manualInclude]);
+
   const { brands, viralRows, suspectRows } = useMemo(() => {
     const videos = rows.filter(r => isVideo(r.type) || r.platform === "tiktok");
     const grouped = _.groupBy(videos, "compte");
@@ -207,7 +344,7 @@ export default function Dashboard() {
       const platforms = _.uniq(vids.map(v => v.platform));
       const weeks = _.uniq(vids.map(v => v.week).filter(Boolean));
       const avgVidsPerWeek = weeks.length > 0 ? Math.round(vids.length / weeks.length * 10) / 10 : vids.length;
-      const nbChaud = vids.filter(v => manualExclude.some(u => u.replace(/\/$/, "") === (v.url || "").replace(/\/$/, ""))).length;
+      const nbChaud = vids.filter(v => classifyHotCold(v).type === "chaud").length;
       const nbFroid = vids.length - nbChaud;
       return { compte, nbVideos: vids.length, avgViews: avg, nbViral: nv, avgEngagement: ae, vids, platforms, avgVidsPerWeek, nbChaud, nbFroid };
     });
@@ -216,13 +353,17 @@ export default function Dashboard() {
     const suspect = [];
     brandsArr.forEach(b => { if (b.nbVideos < 3) return; const thr = b.avgViews * 1.5; b.vids.forEach(v => { const vw = Number(v.views) || 0; const eng = calcEng(v); if (vw >= thr && eng < 0.01) suspect.push({ ...v, avgCompte: Math.round(b.avgViews), avgEngCompte: b.avgEngagement, eng, ratioVues: b.avgViews > 0 ? (vw / b.avgViews).toFixed(1) : "\u2014" }); }); });
     return { brands: brandsArr, viralRows: viral, suspectRows: suspect };
-  }, [rows, manualExclude]);
+  }, [rows, classifyHotCold]);
 
   const viralWithType = useMemo(() => viralRows.map(r => {
-    const url = (r.url || "").replace(/\/$/, "");
-    if (manualExclude.some(u => u.replace(/\/$/, "") === url)) return { ...r, tempType: "chaud" };
-    return { ...r, tempType: "froid" };
-  }), [viralRows, manualExclude]);
+    const classification = classifyHotCold(r);
+    return {
+      ...r,
+      tempType: classification.type,
+      classSource: classification.source,
+      hotKeywordsFound: classification.keywords.slice(0, 3).join(", "),
+    };
+  }), [viralRows, classifyHotCold]);
 
   const filteredViral = useMemo(() => {
     if (viralFilter === "all") return viralWithType;
@@ -231,8 +372,19 @@ export default function Dashboard() {
 
   const nbFroid = viralWithType.filter(r => r.tempType === "froid").length;
   const nbChaud = viralWithType.filter(r => r.tempType === "chaud").length;
-  const handleManualExclude = url => setManualExclude(prev => [...prev, url]);
-  const handleManualInclude = url => setManualExclude(prev => prev.filter(u => u.replace(/\/$/, "") !== url.replace(/\/$/, "")));
+  const nbAutoChaud = viralWithType.filter(r => r.tempType === "chaud" && r.classSource === "auto").length;
+  const nbManuelChaud = viralWithType.filter(r => r.tempType === "chaud" && r.classSource === "manuel").length;
+
+  /* Marquer comme chaud (override manuel) */
+  const handleManualExclude = url => {
+    setManualExclude(prev => [...prev, url]);
+    setManualInclude(prev => prev.filter(u => u.replace(/\/$/, "") !== url.replace(/\/$/, "")));
+  };
+  /* Remettre en froid (override) */
+  const handleManualInclude = url => {
+    setManualInclude(prev => [...prev, url]);
+    setManualExclude(prev => prev.filter(u => u.replace(/\/$/, "") !== url.replace(/\/$/, "")));
+  };
 
   const sponsoRows = useMemo(() => {
     const kw = ["partenariat r\u00e9mun\u00e9r\u00e9", "partenariat remunere", "collaboration commerciale", "partenariat"];
@@ -326,24 +478,41 @@ export default function Dashboard() {
 
         {/* VIRAUX */}
         {page === "viraux" && (<>
-          <KPI items={[["\ud83d\udd25 Total", viralRows.length, "#fbbf24"], ["\u2744\ufe0f Froid", nbFroid, "#60a5fa"], ["\ud83d\udd25 Chaud", nbChaud, "#ef4444"]]} />
+          <KPI items={[
+            ["\ud83d\udd25 Total", viralRows.length, "#fbbf24"],
+            ["\u2744\ufe0f Froid", nbFroid, "#60a5fa"],
+            ["\ud83d\udd25 Chaud", nbChaud, "#ef4444"],
+            ["\ud83e\udd16 Auto-class\u00e9", nbAutoChaud, "#f59e0b"],
+            ["\u270b Manuel", nbManuelChaud, "#a78bfa"],
+          ]} />
+          <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "rgba(255,255,255,0.5)", lineHeight: 1.6 }}>
+            <strong style={{ color: "#fff" }}>Classification auto par mots-cl\u00e9s :</strong> la caption est scann\u00e9e pour d\u00e9tecter politique, faits divers, guerre, d\u00e9c\u00e8s, r\u00e9sultats sportifs, catastrophes.
+            {" "}Pas de match = froid. Tu peux corriger manuellement avec les boutons \u2715 et \u21a9\ufe0f.
+            {" "}<span style={{ color: "#f59e0b" }}>\ud83e\udd16 = class\u00e9 auto</span> \u00b7 <span style={{ color: "#a78bfa" }}>\u270b = class\u00e9 manuellement</span>
+          </div>
           <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
             {[["froid", "\u2744\ufe0f Froid", "#60a5fa"], ["chaud", "\ud83d\udd25 Chaud", "#ef4444"], ["all", "Tous", "rgba(255,255,255,0.5)"]].map(([k, l, c]) => (
               <button key={k} onClick={() => setViralFilter(k)} style={{ padding: "7px 14px", borderRadius: 8, border: viralFilter === k ? "1px solid " + c : "1px solid rgba(255,255,255,0.1)", background: viralFilter === k ? c + "22" : "transparent", color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: viralFilter === k ? 600 : 400 }}>{l}</button>
             ))}
-            <span style={{ marginLeft: "auto", fontSize: 11, color: "rgba(255,255,255,0.3)" }}>Clique \u2715 pour exclure</span>
+            <span style={{ marginLeft: "auto", fontSize: 11, color: "rgba(255,255,255,0.3)" }}>\u2715 = marquer chaud \u00b7 \u21a9\ufe0f = remettre froid</span>
           </div>
-          <SortTable data={filteredViral} gridCols="30px 95px 70px 1fr 80px 75px 50px 65px 45px 30px 30px" exportData={expViraux} exportHeaders={hViraux} exportName="viraux"
+          <SortTable data={filteredViral} gridCols="30px 90px 65px 40px 1fr 75px 70px 45px 60px 45px 55px 30px 25px" exportData={expViraux} exportHeaders={hViraux} exportName="viraux"
             columns={[
               platCol,
               { key: "compte", label: "Compte", bold: true, color: "#fff" },
               { key: "date", label: "Date", render: r => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
-              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 90)}</a> : r.caption?.slice(0, 90) },
+              { key: "week", label: "Sem.", color: "rgba(255,255,255,0.4)" },
+              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 80)}</a> : r.caption?.slice(0, 80) },
               { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
               { key: "avgCompte", label: "Moy.", fmt: true, color: "rgba(255,255,255,0.4)" },
               { key: "ratio", label: "Ratio", render: r => <span style={{ color: "#fbbf24", fontWeight: 700 }}>{r.ratio}x</span> },
               { key: "engagement", label: "Eng.", render: renderEng, color: "#34d399" },
               { key: "tempType", label: "Type", render: r => r.tempType === "froid" ? <span style={{ color: "#60a5fa" }}>\u2744\ufe0f</span> : <span style={{ color: "#ef4444" }}>\ud83d\udd25</span> },
+              { key: "classSource", label: "Source", render: r => {
+                if (r.tempType === "froid" && r.classSource === "default") return <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 10 }}>\u2014</span>;
+                if (r.classSource === "auto") return <span title={"Mots-cl\u00e9s : " + r.hotKeywordsFound} style={{ color: "#f59e0b", fontSize: 10, cursor: "help" }}>\ud83e\udd16 auto</span>;
+                return <span style={{ color: "#a78bfa", fontSize: 10 }}>\u270b</span>;
+              }},
               { key: "action", label: "", render: r => r.tempType === "chaud"
                 ? <button onClick={() => handleManualInclude(r.url)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#60a5fa" }} title="Remettre en froid">\u21a9\ufe0f</button>
                 : <button onClick={() => handleManualExclude(r.url)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#ef4444" }} title="Marquer comme chaud">\u2715</button>
