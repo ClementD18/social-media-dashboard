@@ -272,13 +272,13 @@ const platCol = { key: "platform", label: "Plat.", render: r => <span title={r.p
 const KPI = ({ items }) => <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8, marginBottom: 12 }}>{items.map(([l,v,c]) => <div key={l} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "10px 12px" }}><div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>{l}</div><div style={{ fontSize: 18, fontWeight: 700, color: c }}>{v}</div></div>)}</div>;
 
 /* ─── EXPORT BUILDERS ─── */
-const expContenus = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.week || "", r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
+const expContenus = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.week || "", r.tempType || "", r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
 const expMarques = rows => rows.map(b => [b.compte, b.platforms?.join("+"), b.nbVideos, b.avgVidsPerWeek, Math.round(b.avgViews), (b.avgEngagement*100).toFixed(2)+"%", b.nbViral, b.nbChaud, b.nbFroid]);
 const expViraux = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.week || "", cleanCap(r.caption), r.views ?? "", r.avgCompte ?? "", r.ratio ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.tempType || "", r.hotKeywordsFound || "", r.url]; });
 const expSuspects = rows => rows.map(r => [r.platform, r.compte, fmtDate(r.date), cleanCap(r.caption), r.views ?? "", r.ratioVues ?? "", (r.eng*100).toFixed(2)+"%", (r.avgEngCompte*100).toFixed(2)+"%", r.url]);
 const expSponso = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
 
-const hContenus = ["Plateforme","Compte","Date","Semaine","Type","Caption","Vues","Likes","Com.","Engagement","URL"];
+const hContenus = ["Plateforme","Compte","Date","Semaine","Chaud/Froid","Type","Caption","Vues","Likes","Com.","Engagement","URL"];
 const hMarques = ["Compte","Plateformes","Vid\u00e9os","Moy./Sem.","Moy. vues","Engagement","Virales","Chaud","Froid"];
 const hViraux = ["Plateforme","Compte","Date","Semaine","Caption","Vues","Moy.","Ratio","Engagement","Type","Mots-cl\u00e9s","URL"];
 const hSuspects = ["Plateforme","Compte","Date","Caption","Vues","Ratio","Engagement","Moy. eng.","URL"];
@@ -331,22 +331,37 @@ export default function Dashboard() {
     return { type: "froid", source: "default", keywords: [] };
   }, [manualExclude, manualInclude]);
 
+  /* Enrichit chaque row avec sa classification chaud/froid */
+  const rowsWithType = useMemo(() => rows.map(r => {
+    const c = classifyHotCold(r);
+    return { ...r, tempType: c.type, classSource: c.source, hotKeywordsFound: c.keywords.slice(0, 3).join(", ") };
+  }), [rows, classifyHotCold]);
+
   const { brands, viralRows, suspectRows } = useMemo(() => {
     const videos = rows.filter(r => isVideo(r.type) || r.platform === "tiktok");
     const grouped = _.groupBy(videos, "compte");
     const brandsArr = Object.entries(grouped).filter(([c, vids]) => vids.length >= 3).map(([compte, vids]) => {
-      const vl = vids.map(v => Number(v.views) || 0);
-      const avg = vl.length ? _.mean(vl) : 0;
-      const thr = avg * 2.5;
-      const nv = vl.filter(v => v >= thr).length;
+      /* Sépare froid / chaud */
+      const coldVids = vids.filter(v => classifyHotCold(v).type === "froid");
+      const nbChaud = vids.length - coldVids.length;
+      const nbFroid = coldVids.length;
+
+      /* Moyenne calculée UNIQUEMENT sur les vidéos froides */
+      const coldViews = coldVids.map(v => Number(v.views) || 0);
+      const avgCold = coldViews.length ? _.mean(coldViews) : 0;
+
+      /* Seuil viral = 2.5x la moyenne froide */
+      const thr = avgCold * 2.5;
+      const nv = vids.map(v => Number(v.views) || 0).filter(v => v >= thr).length;
+
+      /* Engagement moyen (sur toutes les vidéos) */
       const engs = vids.map(v => calcEng(v));
       const ae = engs.length ? _.mean(engs) : 0;
+
       const platforms = _.uniq(vids.map(v => v.platform));
       const weeks = _.uniq(vids.map(v => v.week).filter(Boolean));
       const avgVidsPerWeek = weeks.length > 0 ? Math.round(vids.length / weeks.length * 10) / 10 : vids.length;
-      const nbChaud = vids.filter(v => classifyHotCold(v).type === "chaud").length;
-      const nbFroid = vids.length - nbChaud;
-      return { compte, nbVideos: vids.length, avgViews: avg, nbViral: nv, avgEngagement: ae, vids, platforms, avgVidsPerWeek, nbChaud, nbFroid };
+      return { compte, nbVideos: vids.length, avgViews: avgCold, nbViral: nv, avgEngagement: ae, vids, platforms, avgVidsPerWeek, nbChaud, nbFroid };
     });
     const viral = [];
     brandsArr.forEach(b => { const thr = b.avgViews * 2.5; b.vids.forEach(v => { const views = Number(v.views) || 0; if (views >= thr) viral.push({ ...v, avgCompte: Math.round(b.avgViews), ratio: b.avgViews > 0 ? (views / b.avgViews).toFixed(1) : "\u2014" }); }); });
@@ -444,15 +459,16 @@ export default function Dashboard() {
 
         {/* CONTENUS */}
         {page === "contenus" && (<>
-          <KPI items={[["\ud83d\udcdd Posts", rows.length, "#a78bfa"], ["\ud83c\udfac Vid\u00e9os", rows.filter(r => isVideo(r.type) || r.platform === "tiktok").length, "#c084fc"], ["\ud83d\udc41 Vues", fmt(tot("views")), "#818cf8"], ["\u2764\ufe0f Likes", fmt(tot("likes")), "#f472b6"], ["\ud83d\udcac Com.", fmt(tot("comments")), "#60a5fa"]]} />
-          <SortTable data={rows} gridCols="30px 95px 75px 50px 35px 1fr 75px 60px 55px 70px" exportData={expContenus} exportHeaders={hContenus} exportName="contenus"
+          <KPI items={[["\ud83d\udcdd Posts", rows.length, "#a78bfa"], ["\ud83c\udfac Vid\u00e9os", rows.filter(r => isVideo(r.type) || r.platform === "tiktok").length, "#c084fc"], ["\ud83d\udc41 Vues", fmt(tot("views")), "#818cf8"], ["\u2764\ufe0f Likes", fmt(tot("likes")), "#f472b6"], ["\u2744\ufe0f Froid", rowsWithType.filter(r => r.tempType === "froid").length, "#60a5fa"], ["\ud83d\udd25 Chaud", rowsWithType.filter(r => r.tempType === "chaud").length, "#ef4444"]]} />
+          <SortTable data={rowsWithType} gridCols="30px 90px 70px 45px 30px 35px 1fr 70px 55px 50px 60px" exportData={expContenus} exportHeaders={hContenus} exportName="contenus"
             columns={[
               platCol,
               { key: "compte", label: "Compte", bold: true, color: "#fff" },
               { key: "date", label: "Date", render: r => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
               { key: "week", label: "Sem.", color: "rgba(255,255,255,0.4)" },
+              { key: "tempType", label: "", render: r => r.tempType === "chaud" ? <span title={"Chaud" + (r.hotKeywordsFound ? " : " + r.hotKeywordsFound : "")} style={{ cursor: "help" }}>\ud83d\udd25</span> : <span title="Froid">\u2744\ufe0f</span> },
               { key: "type", label: "", render: r => typeIcon(r.type) },
-              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 120)}</a> : r.caption?.slice(0, 120) },
+              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 110)}</a> : r.caption?.slice(0, 110) },
               { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
               { key: "likes", label: "Likes", fmt: true, color: "#f472b6" },
               { key: "comments", label: "Com.", fmt: true, color: "#60a5fa" },
@@ -462,13 +478,13 @@ export default function Dashboard() {
 
         {/* MARQUES */}
         {page === "marques" && (<>
-          <KPI items={[["\ud83c\udfe2 Comptes", brands.length, "#a78bfa"], ["\ud83c\udfac Vid\u00e9os", fmt(_.sumBy(brands, "nbVideos")), "#818cf8"], ["\ud83d\udc41 Moy. vues", fmt(Math.round(_.meanBy(brands, "avgViews") || 0)), "#f472b6"], ["\ud83d\udd25 Virales", fmt(_.sumBy(brands, "nbViral")), "#fbbf24"]]} />
+          <KPI items={[["\ud83c\udfe2 Comptes", brands.length, "#a78bfa"], ["\ud83c\udfac Vid\u00e9os", fmt(_.sumBy(brands, "nbVideos")), "#818cf8"], ["\u2744\ufe0f Moy. froid", fmt(Math.round(_.meanBy(brands, "avgViews") || 0)), "#f472b6"], ["\ud83d\udd25 Virales", fmt(_.sumBy(brands, "nbViral")), "#fbbf24"]]} />
           <SortTable data={brands} gridCols="1fr 80px 65px 80px 110px 95px 80px 65px 55px 55px" exportData={expMarques} exportHeaders={hMarques} exportName="marques" searchPlaceholder="\ud83d\udd0d Rechercher un compte..."
             columns={[
               { key: "compte", label: "Compte", bold: true, color: "#fff", render: r => <span>{r.platforms?.map(p => platformIcon(p)).join(" ")} {r.compte}</span> },
               { key: "nbVideos", label: "Vid\u00e9os", bold: true, color: "#818cf8" },
               { key: "avgVidsPerWeek", label: "Moy./Sem.", render: r => <span style={{ color: "#a78bfa" }}>{r.avgVidsPerWeek}</span> },
-              { key: "avgViews", label: "Moy. vues", render: r => fmt(Math.round(r.avgViews)), bold: true, color: "#f472b6" },
+              { key: "avgViews", label: "Moy. froid", render: r => <span title="Moyenne calcul\u00e9e uniquement sur les vid\u00e9os froides">{fmt(Math.round(r.avgViews))}</span>, bold: true, color: "#f472b6" },
               { key: "avgEngagement", label: "Engage.", render: r => <span style={{ color: "#34d399", fontWeight: 600 }}>{(r.avgEngagement * 100).toFixed(2)}%</span> },
               { key: "nbViral", label: "> 2.5x", render: r => <span>{r.nbViral > 0 ? <span style={{ color: "#fbbf24" }}>{r.nbViral}</span> : <span style={{ color: "rgba(255,255,255,0.25)" }}>0</span>}{r.nbViral > 0 && r.nbVideos > 0 && <span style={{ color: "rgba(255,255,255,0.3)", marginLeft: 4, fontSize: 11 }}>({Math.round(r.nbViral / r.nbVideos * 100)}%)</span>}</span> },
               { key: "nbChaud", label: "\ud83d\udd25 Chaud", render: r => <span style={{ color: "#f59e0b" }}>{r.nbChaud}</span> },
