@@ -20,10 +20,11 @@ const renderEng = r => { const e = calcEng(r); return e > 0 ? <span style={{ col
 const cleanCap = c => (c || "").replace(/[^\w\s\u00e0-\u00ff\u0152\u0153.,!?:()@#%\u20ac$&+\-'/]/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
 
 /* ─── PLATFORM ICONS (Instagram + TikTok) ─── */
-const platformIcon = p => p === "tiktok" ? "\ud83c\udfb5" : "\ud83d\udcf8";
+const platformIcon = p => { if (p === "tiktok") return "\ud83c\udfb5"; if (p === "youtube") return "\u25b6\ufe0f"; return "\ud83d\udcf8"; };
 const platformColor = p => {
   switch (p) {
     case "tiktok": return { bg: "rgba(255,255,255,0.1)", color: "#fff" };
+    case "youtube": return { bg: "rgba(255,0,0,0.12)", color: "#FF0000" };
     default: return { bg: "rgba(225,48,108,0.15)", color: "#E1306C" };
   }
 };
@@ -122,7 +123,7 @@ const normalizeText = (text) => {
 const isHotCaption = (caption) => { const n = normalizeText(caption); if (!n) return false; return HOT_KEYWORDS.some(kw => n.includes(kw)); };
 const getHotKeywords = (caption) => { const n = normalizeText(caption); if (!n) return []; return HOT_KEYWORDS.filter(kw => n.includes(kw)); };
 
-/* ─── MAP ROW (Instagram + TikTok) ─── */
+/* ─── MAP ROW (Instagram + TikTok + YouTube) ─── */
 function mapRow(row) {
   const keys = Object.keys(row);
   const g = k => { const v = row[k]; return (v !== undefined && v !== null && v !== "") ? v : null; };
@@ -144,6 +145,28 @@ function mapRow(row) {
       url: g("webVideoUrl") || "",
       isPaid: null,
       platform: "tiktok"
+    };
+  }
+
+  /* ── YouTube (détection stricte : colonnes channelName/channelUsername + viewCount) ── */
+  const hasYTCols = keys.includes("channelName") || keys.includes("channelUsername");
+  const hasViewCount = keys.includes("viewCount");
+  if (hasYTCols && hasViewCount) {
+    const dateVal = g("date");
+    const caption = [g("title"), g("text")].filter(Boolean).join(" — ") || "\u2014";
+    return {
+      compte: g("channelName") || g("channelUsername") || "\u2014",
+      date: dateVal,
+      week: getWeekLabel(dateVal),
+      type: g("type") || "shorts",
+      caption: caption,
+      views: g("viewCount"),
+      likes: g("likes"),
+      comments: g("commentsCount"),
+      shares: null,
+      url: g("url") || "",
+      isPaid: g("isPaidContent") === true || g("isPaidContent") === "true" ? true : null,
+      platform: "youtube"
     };
   }
 
@@ -362,6 +385,7 @@ export default function Dashboard() {
   const platformCounts = useMemo(() => ({
     instagram: rows.filter(r => r.platform === "instagram").length,
     tiktok: rows.filter(r => r.platform === "tiktok").length,
+    youtube: rows.filter(r => r.platform === "youtube").length,
   }), [rows]);
 
   /* ─── Classification function ─── */
@@ -469,9 +493,9 @@ export default function Dashboard() {
         style={{ border: drag ? "2px dashed #6366f1" : "2px dashed rgba(255,255,255,0.15)", background: drag ? "rgba(99,102,241,0.1)" : "rgba(255,255,255,0.04)", borderRadius: 20, padding: "56px 40px", maxWidth: 520, width: "100%", textAlign: "center", cursor: "pointer" }}>
         <div style={{ fontSize: 52, marginBottom: 14 }}>\ud83d\udcc2</div>
         <h1 style={{ color: "#fff", fontSize: 20, margin: "0 0 8px" }}>Importe tes fichiers</h1>
-        <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 13, margin: "0 0 22px", lineHeight: 1.5 }}>Glisse tes CSV ici (Instagram + TikTok)</p>
+        <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 13, margin: "0 0 22px", lineHeight: 1.5 }}>Glisse tes CSV ici (Instagram + TikTok + YouTube)</p>
         <div style={{ display: "flex", gap: 10, justifyContent: "center", marginBottom: 16, flexWrap: "wrap" }}>
-          {[["instagram","\ud83d\udcf8 Instagram"],["tiktok","\ud83c\udfb5 TikTok"]].map(([p, l]) => {
+          {[["instagram","\ud83d\udcf8 Instagram"],["tiktok","\ud83c\udfb5 TikTok"],["youtube","\u25b6\ufe0f YouTube"]].map(([p, l]) => {
             const c = platformColor(p);
             return <span key={p} style={{ padding: "6px 14px", borderRadius: 8, background: c.bg, color: c.color, fontSize: 13 }}>{l}</span>;
           })}
@@ -492,7 +516,7 @@ export default function Dashboard() {
             <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, margin: 0 }}>
               {files.map((f, i) => <span key={i}>\ud83d\udcc4 {f}{i < files.length - 1 ? " \u00b7 " : ""}</span>)}
               {" \u2014 "}{rows.length} posts \u00b7 {brands.length} comptes
-              {["instagram","tiktok"].map(p => {
+              {["instagram","tiktok","youtube"].map(p => {
                 const count = platformCounts[p];
                 if (!count) return null;
                 const c = platformColor(p);
