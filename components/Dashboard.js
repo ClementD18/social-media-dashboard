@@ -289,16 +289,11 @@ const hSuspects = ["Plateforme","Compte","Date","Caption","Vues","Ratio","Engage
 const hSponso = ["Plateforme","Compte","Date","Type","Caption","Vues","Likes","Com.","Engagement","URL"];
 
 /* ─── STORAGE HELPERS ─── */
-const STORAGE_KEY = "dashboard-rows";
-const STORAGE_FILES_KEY = "dashboard-files";
-const STORAGE_MANUAL_EXCLUDE_KEY = "dashboard-manual-exclude";
-const STORAGE_MANUAL_INCLUDE_KEY = "dashboard-manual-include";
+const storageKey = (env, suffix) => `dashboard-${env}-${suffix}`;
 
 async function saveToStorage(key, data) {
   try {
-    if (window.storage) {
-      await window.storage.set(key, JSON.stringify(data));
-    }
+    if (window.storage) await window.storage.set(key, JSON.stringify(data));
   } catch (e) { console.error("Storage save error:", e); }
 }
 
@@ -312,8 +307,38 @@ async function loadFromStorage(key) {
   return null;
 }
 
+async function loadEnvData(env) {
+  const [r, f, ex, inc] = await Promise.all([
+    loadFromStorage(storageKey(env, "rows")),
+    loadFromStorage(storageKey(env, "files")),
+    loadFromStorage(storageKey(env, "manual-exclude")),
+    loadFromStorage(storageKey(env, "manual-include")),
+  ]);
+  return { rows: r || [], files: f || [], exclude: ex || MANUAL_EXCLUDE, include: inc || [] };
+}
+
+async function saveEnvData(env, rows, files, exclude, include) {
+  await Promise.all([
+    saveToStorage(storageKey(env, "rows"), rows),
+    saveToStorage(storageKey(env, "files"), files),
+    saveToStorage(storageKey(env, "manual-exclude"), exclude),
+    saveToStorage(storageKey(env, "manual-include"), include),
+  ]);
+}
+
+async function clearEnvData(env) {
+  try {
+    if (window.storage) {
+      await window.storage.delete(storageKey(env, "rows"));
+      await window.storage.delete(storageKey(env, "files"));
+      await window.storage.delete(storageKey(env, "manual-exclude"));
+      await window.storage.delete(storageKey(env, "manual-include"));
+    }
+  } catch (e) { console.error("Storage clear error:", e); }
+}
+
 /* ─── MAIN DASHBOARD ─── */
-export default function Dashboard() {
+export default function Dashboard({ env = "prod" }) {
   const [rows, setRows] = useState([]);
   const [drag, setDrag] = useState(false);
   const [files, setFiles] = useState([]);
@@ -323,72 +348,45 @@ export default function Dashboard() {
   const [viralFilter, setViralFilter] = useState("froid");
   const [loading, setLoading] = useState(true);
   const initialized = useRef(false);
+  const isPreprod = env === "preprod";
 
-  /* ── Load persisted data on mount ── */
+  /* ── Load data for this env on mount ── */
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
     (async () => {
-      const [savedRows, savedFiles, savedExclude, savedInclude] = await Promise.all([
-        loadFromStorage(STORAGE_KEY),
-        loadFromStorage(STORAGE_FILES_KEY),
-        loadFromStorage(STORAGE_MANUAL_EXCLUDE_KEY),
-        loadFromStorage(STORAGE_MANUAL_INCLUDE_KEY),
-      ]);
-      if (savedRows && savedRows.length > 0) setRows(savedRows);
-      if (savedFiles && savedFiles.length > 0) setFiles(savedFiles);
-      if (savedExclude) setManualExclude(savedExclude);
-      if (savedInclude) setManualInclude(savedInclude);
+      const d = await loadEnvData(env);
+      setRows(d.rows); setFiles(d.files);
+      setManualExclude(d.exclude); setManualInclude(d.include);
       setLoading(false);
     })();
-  }, []);
+  }, [env]);
 
-  /* ── Persist data whenever it changes ── */
+  /* ── Persist whenever data changes ── */
   useEffect(() => {
     if (loading) return;
-    saveToStorage(STORAGE_KEY, rows);
-    saveToStorage(STORAGE_FILES_KEY, files);
-  }, [rows, files, loading]);
+    saveEnvData(env, rows, files, manualExclude, manualInclude);
+  }, [rows, files, manualExclude, manualInclude, loading, env]);
 
-  useEffect(() => {
-    if (loading) return;
-    saveToStorage(STORAGE_MANUAL_EXCLUDE_KEY, manualExclude);
-  }, [manualExclude, loading]);
-
-  useEffect(() => {
-    if (loading) return;
-    saveToStorage(STORAGE_MANUAL_INCLUDE_KEY, manualInclude);
-  }, [manualInclude, loading]);
-
-  /* ── Import avec dédoublonnage intelligent : même URL → on garde les vues les plus hautes ── */
+  /* ── Import direct avec dédoublonnage (plus hautes vues) ── */
   const loadFile = useCallback((f) => {
     Papa.parse(f, { header: true, dynamicTyping: true, skipEmptyLines: true, complete: (r) => {
       const mapped = r.data.map(mapRow).filter(x => x.date || x.caption !== "\u2014");
       setRows(prev => {
         const byUrl = new Map();
-        prev.forEach(r => {
-          const url = (r.url || "").replace(/\/$/, "");
-          if (url) byUrl.set(url, r);
-        });
-        const noUrlRows = prev.filter(r => !(r.url || "").replace(/\/$/, ""));
-
+        prev.forEach(r => { const u = (r.url || "").replace(/\/$/, ""); if (u) byUrl.set(u, r); });
+        const noUrl = prev.filter(r => !(r.url || "").replace(/\/$/, ""));
         mapped.forEach(r => {
-          const url = (r.url || "").replace(/\/$/, "");
-          if (!url) { noUrlRows.push(r); return; }
-          const existing = byUrl.get(url);
-          if (!existing) {
-            byUrl.set(url, r);
-          } else {
-            /* Même URL → on garde la ligne avec le plus de vues, et on met à jour les métriques */
-            const newViews = Number(r.views) || 0;
-            const oldViews = Number(existing.views) || 0;
-            if (newViews > oldViews) {
-              byUrl.set(url, { ...existing, views: r.views, likes: r.likes, comments: r.comments, shares: r.shares });
-            }
+          const u = (r.url || "").replace(/\/$/, "");
+          if (!u) { noUrl.push(r); return; }
+          const ex = byUrl.get(u);
+          if (!ex) { byUrl.set(u, r); }
+          else {
+            const nv = Number(r.views) || 0, ov = Number(ex.views) || 0;
+            if (nv > ov) byUrl.set(u, { ...ex, views: r.views, likes: r.likes, comments: r.comments, shares: r.shares });
           }
         });
-
-        return [...noUrlRows, ...byUrl.values()];
+        return [...noUrl, ...byUrl.values()];
       });
       setFiles(prev => [...prev, f.name]);
     }});
@@ -505,19 +503,12 @@ export default function Dashboard() {
   const TABS = [["contenus","\ud83d\udcdd Contenus"],["marques","\ud83c\udfe2 Marques"],["viraux","\ud83d\udd25 Viraux"],["suspects","\ud83e\udd14 Suspects"],["sponso","\ud83e\udd1d Sponsos"]];
   const badge = k => { const map = { viraux: [nbFroid+"/"+viralRows.length,"#fbbf24"], suspects: [suspectRows.length,"#f472b6"], sponso: [sponsoRows.length,"#34d399"] }; const m = map[k]; if (!m) return null; return <span style={{ marginLeft: 6, padding: "2px 7px", borderRadius: 10, background: m[1]+"33", color: m[1], fontSize: 11 }}>{m[0]}</span>; };
 
-  /* ── Reset complet (vide aussi le storage) ── */
+  /* ── Reset l'env courant ── */
   const handleReset = async () => {
     setRows([]); setFiles([]);
     setManualExclude(MANUAL_EXCLUDE);
     setManualInclude([]);
-    try {
-      if (window.storage) {
-        await window.storage.delete(STORAGE_KEY);
-        await window.storage.delete(STORAGE_FILES_KEY);
-        await window.storage.delete(STORAGE_MANUAL_EXCLUDE_KEY);
-        await window.storage.delete(STORAGE_MANUAL_INCLUDE_KEY);
-      }
-    } catch (e) { console.error("Storage reset error:", e); }
+    await clearEnvData(env);
   };
 
   /* ─── LOADING SCREEN ─── */
@@ -532,7 +523,8 @@ export default function Dashboard() {
 
   /* ─── UPLOAD SCREEN ─── */
   if (!rows.length) return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg,#0f0f23,#1a1a3e)", fontFamily: "system-ui", padding: 20 }}>
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: isPreprod ? "linear-gradient(135deg,#1a1a0f,#2e2e1a)" : "linear-gradient(135deg,#0f0f23,#1a1a3e)", fontFamily: "system-ui", padding: 20 }}>
+      {isPreprod && <div style={{ position: "absolute", top: 20, left: 20, padding: "6px 14px", borderRadius: 8, background: "rgba(251,191,36,0.15)", border: "1px solid rgba(251,191,36,0.4)", color: "#fbbf24", fontSize: 12, fontWeight: 700 }}>{"\ud83d\udfe1"} PREPROD</div>}
       <div onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={handleDrop} onClick={() => document.getElementById("up").click()}
         style={{ border: drag ? "2px dashed #6366f1" : "2px dashed rgba(255,255,255,0.15)", background: drag ? "rgba(99,102,241,0.1)" : "rgba(255,255,255,0.04)", borderRadius: 20, padding: "56px 40px", maxWidth: 520, width: "100%", textAlign: "center", cursor: "pointer" }}>
         <div style={{ fontSize: 52, marginBottom: 14 }}>\ud83d\udcc2</div>
@@ -552,11 +544,19 @@ export default function Dashboard() {
 
   /* ─── MAIN ─── */
   return (
-    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#0f0f23,#1a1a3e)", fontFamily: "system-ui", color: "#fff", padding: "20px 16px" }}>
+    <div style={{ minHeight: "100vh", background: isPreprod ? "linear-gradient(135deg,#1a1a0f,#2e2e1a)" : "linear-gradient(135deg,#0f0f23,#1a1a3e)", fontFamily: "system-ui", color: "#fff", padding: "20px 16px" }}>
       <div style={{ maxWidth: 1150, margin: "0 auto" }}>
+        {/* ── ENV BADGE ── */}
+        {isPreprod && (
+          <div style={{ background: "rgba(251,191,36,0.1)", border: "1px solid rgba(251,191,36,0.3)", borderRadius: 10, padding: "8px 14px", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ color: "#fbbf24", fontSize: 12, fontWeight: 600 }}>{"\ud83d\udfe1"} PREPROD \u2014 Environnement de test. Ces donn\u00e9es n'affectent pas la production.</span>
+            <a href="/" style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, textDecoration: "none" }}>\u2192 Aller en prod</a>
+          </div>
+        )}
+
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <div>
-            <h1 style={{ fontSize: 18, margin: 0 }}>\ud83d\udcca Social Media Dashboard</h1>
+            <h1 style={{ fontSize: 18, margin: 0 }}>\ud83d\udcca Social Media Dashboard {isPreprod && <span style={{ fontSize: 12, color: "#fbbf24", fontWeight: 400 }}>(preprod)</span>}</h1>
             <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, margin: 0 }}>
               {files.map((f, i) => <span key={i}>\ud83d\udcc4 {f}{i < files.length - 1 ? " \u00b7 " : ""}</span>)}
               {" \u2014 "}{rows.length} posts \u00b7 {brands.length} comptes
@@ -571,7 +571,7 @@ export default function Dashboard() {
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={() => document.getElementById("up2").click()} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(99,102,241,0.4)", background: "rgba(99,102,241,0.1)", color: "#818cf8", fontSize: 12, cursor: "pointer" }}>\u2795 Ajouter CSV</button>
             <input id="up2" type="file" accept=".csv" multiple onChange={handleFileInput} style={{ display: "none" }} />
-            <button onClick={handleReset} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)", fontSize: 12, cursor: "pointer" }}>\ud83d\udd04 Reset</button>
+            <button onClick={handleReset} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)", fontSize: 12, cursor: "pointer" }}>{isPreprod ? "\ud83d\uddd1 Vider preprod" : "\ud83d\udd04 Reset"}</button>
           </div>
         </div>
 
