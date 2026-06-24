@@ -277,13 +277,13 @@ const KPI = ({ items }) => <div style={{ display: "grid", gridTemplateColumns: "
 
 /* ─── EXPORT BUILDERS ─── */
 const expContenus = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.week || "", r.tempType || "", r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
-const expMarques = rows => rows.map(b => [b.compte, b.platforms?.join("+"), b.nbVideos, b.avgVidsPerWeek, Math.round(b.avgViews), (b.avgEngagement*100).toFixed(2)+"%", b.nbViral, b.nbChaud, b.nbFroid]);
+const expMarques = rows => rows.map(b => [b.compte, b.platforms?.join("+"), b.nbVideos, b.nbWeeks, b.avgVidsPerWeek, b.avgFroidPerWeek, b.avgChaudPerWeek, Math.round(b.avgViews), Math.round(b.avgViewsHot), Math.round(b.medianCold), (b.avgEngCold*100).toFixed(2)+"%", (b.avgEngHot*100).toFixed(2)+"%", b.nbViral, b.nbFroid, b.nbChaud, b.lastWeek]);
 const expViraux = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.week || "", cleanCap(r.caption), r.views ?? "", r.avgCompte ?? "", r.ratio ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.tempType || "", r.hotKeywordsFound || "", r.url]; });
 const expSuspects = rows => rows.map(r => [r.platform, r.compte, fmtDate(r.date), cleanCap(r.caption), r.views ?? "", r.ratioVues ?? "", (r.eng*100).toFixed(2)+"%", (r.avgEngCompte*100).toFixed(2)+"%", r.url]);
 const expSponso = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
 
 const hContenus = ["Plateforme","Compte","Date","Semaine","Chaud/Froid","Type","Caption","Vues","Likes","Com.","Engagement","URL"];
-const hMarques = ["Compte","Plateformes","Vid\u00e9os","Moy./Sem.","Moy. vues froid","Engagement","Virales","Chaud","Froid"];
+const hMarques = ["Compte","Plateformes","Vid\u00e9os","Semaines","Pub/Sem.","Froid/Sem.","Chaud/Sem.","Moy. vues froid","Moy. vues chaud","M\u00e9diane froid","Eng. froid","Eng. chaud","Virales","Froid","Chaud","Derni\u00e8re sem."];
 const hViraux = ["Plateforme","Compte","Date","Semaine","Caption","Vues","Moy.","Ratio","Engagement","Type","Mots-cl\u00e9s","URL"];
 const hSuspects = ["Plateforme","Compte","Date","Caption","Vues","Ratio","Engagement","Moy. eng.","URL"];
 const hSponso = ["Plateforme","Compte","Date","Type","Caption","Vues","Likes","Com.","Engagement","URL"];
@@ -360,20 +360,35 @@ export default function Dashboard() {
     saveToStorage(STORAGE_MANUAL_INCLUDE_KEY, manualInclude);
   }, [manualInclude, loading]);
 
-  /* ── Déduplique par URL lors de l'import ── */
+  /* ── Import avec dédoublonnage intelligent : même URL → on garde les vues les plus hautes ── */
   const loadFile = useCallback((f) => {
     Papa.parse(f, { header: true, dynamicTyping: true, skipEmptyLines: true, complete: (r) => {
       const mapped = r.data.map(mapRow).filter(x => x.date || x.caption !== "\u2014");
       setRows(prev => {
-        const existingUrls = new Set(prev.map(r => (r.url || "").replace(/\/$/, "")).filter(Boolean));
-        const newRows = mapped.filter(r => {
+        const byUrl = new Map();
+        prev.forEach(r => {
           const url = (r.url || "").replace(/\/$/, "");
-          if (!url) return true; // pas d'URL → on garde
-          if (existingUrls.has(url)) return false; // doublon → skip
-          existingUrls.add(url);
-          return true;
+          if (url) byUrl.set(url, r);
         });
-        return [...prev, ...newRows];
+        const noUrlRows = prev.filter(r => !(r.url || "").replace(/\/$/, ""));
+
+        mapped.forEach(r => {
+          const url = (r.url || "").replace(/\/$/, "");
+          if (!url) { noUrlRows.push(r); return; }
+          const existing = byUrl.get(url);
+          if (!existing) {
+            byUrl.set(url, r);
+          } else {
+            /* Même URL → on garde la ligne avec le plus de vues, et on met à jour les métriques */
+            const newViews = Number(r.views) || 0;
+            const oldViews = Number(existing.views) || 0;
+            if (newViews > oldViews) {
+              byUrl.set(url, { ...existing, views: r.views, likes: r.likes, comments: r.comments, shares: r.shares });
+            }
+          }
+        });
+
+        return [...noUrlRows, ...byUrl.values()];
       });
       setFiles(prev => [...prev, f.name]);
     }});
@@ -408,18 +423,47 @@ export default function Dashboard() {
     const grouped = _.groupBy(videos, "compte");
     const brandsArr = Object.entries(grouped).filter(([c, vids]) => vids.length >= 3).map(([compte, vids]) => {
       const coldVids = vids.filter(v => classifyHotCold(v).type === "froid");
-      const nbChaud = vids.length - coldVids.length;
+      const hotVids = vids.filter(v => classifyHotCold(v).type === "chaud");
+      const nbChaud = hotVids.length;
       const nbFroid = coldVids.length;
+
+      /* Moyennes de vues froid / chaud */
       const coldViews = coldVids.map(v => Number(v.views) || 0);
+      const hotViews = hotVids.map(v => Number(v.views) || 0);
       const avgCold = coldViews.length ? _.mean(coldViews) : 0;
+      const avgHot = hotViews.length ? _.mean(hotViews) : 0;
+      const medianCold = coldViews.length ? coldViews.sort((a, b) => a - b)[Math.floor(coldViews.length / 2)] : 0;
+
+      /* Engagement froid / chaud */
+      const engsCold = coldVids.map(v => calcEng(v));
+      const engsHot = hotVids.map(v => calcEng(v));
+      const avgEngCold = engsCold.length ? _.mean(engsCold) : 0;
+      const avgEngHot = engsHot.length ? _.mean(engsHot) : 0;
+
+      /* Seuil viral basé sur le froid */
       const thr = avgCold * 2.5;
       const nv = vids.map(v => Number(v.views) || 0).filter(v => v >= thr).length;
+
+      /* Engagement global */
       const engs = vids.map(v => calcEng(v));
       const ae = engs.length ? _.mean(engs) : 0;
+
       const platforms = _.uniq(vids.map(v => v.platform));
-      const weeks = _.uniq(vids.map(v => v.week).filter(Boolean));
-      const avgVidsPerWeek = weeks.length > 0 ? Math.round(vids.length / weeks.length * 10) / 10 : vids.length;
-      return { compte, nbVideos: vids.length, avgViews: avgCold, nbViral: nv, avgEngagement: ae, vids, platforms, avgVidsPerWeek, nbChaud, nbFroid };
+
+      /* Volume / fréquence */
+      const weeks = _.uniq(vids.map(v => v.week).filter(Boolean)).sort();
+      const nbWeeks = weeks.length;
+      const avgVidsPerWeek = nbWeeks > 0 ? Math.round(vids.length / nbWeeks * 10) / 10 : vids.length;
+      const avgFroidPerWeek = nbWeeks > 0 ? Math.round(nbFroid / nbWeeks * 10) / 10 : nbFroid;
+      const avgChaudPerWeek = nbWeeks > 0 ? Math.round(nbChaud / nbWeeks * 10) / 10 : nbChaud;
+      const lastWeek = weeks.length > 0 ? weeks[weeks.length - 1] : "\u2014";
+
+      return {
+        compte, nbVideos: vids.length, avgViews: avgCold, avgViewsHot: avgHot, medianCold,
+        nbViral: nv, avgEngagement: ae, avgEngCold, avgEngHot,
+        vids, platforms, avgVidsPerWeek, avgFroidPerWeek, avgChaudPerWeek,
+        nbChaud, nbFroid, nbWeeks, lastWeek
+      };
     });
     const viral = [];
     brandsArr.forEach(b => { const thr = b.avgViews * 2.5; b.vids.forEach(v => { const views = Number(v.views) || 0; if (views >= thr) viral.push({ ...v, avgCompte: Math.round(b.avgViews), ratio: b.avgViews > 0 ? (views / b.avgViews).toFixed(1) : "\u2014" }); }); });
@@ -560,17 +604,28 @@ export default function Dashboard() {
 
         {/* MARQUES */}
         {page === "marques" && (<>
-          <KPI items={[["\ud83c\udfe2 Comptes", brands.length, "#a78bfa"], ["\ud83c\udfac Vid\u00e9os", fmt(_.sumBy(brands, "nbVideos")), "#818cf8"], ["\u2744\ufe0f Moy. froid", fmt(Math.round(_.meanBy(brands, "avgViews") || 0)), "#f472b6"], ["\ud83d\udd25 Virales", fmt(_.sumBy(brands, "nbViral")), "#fbbf24"]]} />
-          <SortTable data={brands} gridCols="1fr 80px 65px 80px 110px 95px 80px 65px 55px 55px" exportData={expMarques} exportHeaders={hMarques} exportName="marques" searchPlaceholder="\ud83d\udd0d Rechercher un compte..."
+          <KPI items={[
+            ["\ud83c\udfe2 Comptes", brands.length, "#a78bfa"],
+            ["\ud83c\udfac Vid\u00e9os", fmt(_.sumBy(brands, "nbVideos")), "#818cf8"],
+            ["\u2744\ufe0f Moy. froid", fmt(Math.round(_.meanBy(brands, "avgViews") || 0)), "#60a5fa"],
+            ["\ud83d\udd25 Moy. chaud", fmt(Math.round(_.meanBy(brands.filter(b => b.avgViewsHot > 0), "avgViewsHot") || 0)), "#ef4444"],
+            ["\ud83d\udcc5 Sem. couvertes", Math.round(_.meanBy(brands, "nbWeeks") || 0), "#fbbf24"],
+            ["\ud83d\udd25 Virales", fmt(_.sumBy(brands, "nbViral")), "#f59e0b"],
+          ]} />
+          <SortTable data={brands} gridCols="1fr 55px 50px 60px 80px 80px 70px 70px 55px 55px 55px 50px" exportData={expMarques} exportHeaders={hMarques} exportName="marques" searchPlaceholder="\ud83d\udd0d Rechercher un compte..."
             columns={[
               { key: "compte", label: "Compte", bold: true, color: "#fff", render: r => <span>{r.platforms?.map(p => platformIcon(p)).join(" ")} {r.compte}</span> },
-              { key: "nbVideos", label: "Vid\u00e9os", bold: true, color: "#818cf8" },
-              { key: "avgVidsPerWeek", label: "Moy./Sem.", render: r => <span style={{ color: "#a78bfa" }}>{r.avgVidsPerWeek}</span> },
-              { key: "avgViews", label: "Moy. froid", render: r => <span title="Moyenne calcul\u00e9e uniquement sur les vid\u00e9os froides">{fmt(Math.round(r.avgViews))}</span>, bold: true, color: "#f472b6" },
-              { key: "avgEngagement", label: "Engage.", render: r => <span style={{ color: "#34d399", fontWeight: 600 }}>{(r.avgEngagement * 100).toFixed(2)}%</span> },
-              { key: "nbViral", label: "> 2.5x", render: r => <span>{r.nbViral > 0 ? <span style={{ color: "#fbbf24" }}>{r.nbViral}</span> : <span style={{ color: "rgba(255,255,255,0.25)" }}>0</span>}{r.nbViral > 0 && r.nbVideos > 0 && <span style={{ color: "rgba(255,255,255,0.3)", marginLeft: 4, fontSize: 11 }}>({Math.round(r.nbViral / r.nbVideos * 100)}%)</span>}</span> },
-              { key: "nbChaud", label: "\ud83d\udd25 Chaud", render: r => <span style={{ color: "#f59e0b" }}>{r.nbChaud}</span> },
-              { key: "nbFroid", label: "\u2744\ufe0f Froid", render: r => <span style={{ color: "#60a5fa" }}>{r.nbFroid}</span> },
+              { key: "nbVideos", label: "Vid.", bold: true, color: "#818cf8" },
+              { key: "nbWeeks", label: "Sem.", render: r => <span title={r.nbWeeks + " semaines couvertes \u2014 derni\u00e8re : " + r.lastWeek} style={{ color: "#fbbf24", cursor: "help" }}>{r.nbWeeks}</span> },
+              { key: "avgVidsPerWeek", label: "Pub/S", render: r => <span title={"Froid: " + r.avgFroidPerWeek + "/sem \u00b7 Chaud: " + r.avgChaudPerWeek + "/sem"} style={{ color: "#a78bfa", cursor: "help" }}>{r.avgVidsPerWeek}</span> },
+              { key: "avgViews", label: "\u2744\ufe0f Moy.", render: r => <span title="Moyenne vues froid">{fmt(Math.round(r.avgViews))}</span>, bold: true, color: "#60a5fa" },
+              { key: "avgViewsHot", label: "\ud83d\udd25 Moy.", render: r => r.avgViewsHot > 0 ? <span title="Moyenne vues chaud">{fmt(Math.round(r.avgViewsHot))}</span> : <span style={{ color: "rgba(255,255,255,0.2)" }}>\u2014</span>, bold: true, color: "#ef4444" },
+              { key: "avgEngCold", label: "\u2744\ufe0f Eng.", render: r => r.avgEngCold > 0 ? <span style={{ color: "#34d399" }}>{(r.avgEngCold * 100).toFixed(1)}%</span> : <span style={{ color: "rgba(255,255,255,0.2)" }}>\u2014</span> },
+              { key: "avgEngHot", label: "\ud83d\udd25 Eng.", render: r => r.avgEngHot > 0 ? <span style={{ color: "#f472b6" }}>{(r.avgEngHot * 100).toFixed(1)}%</span> : <span style={{ color: "rgba(255,255,255,0.2)" }}>\u2014</span> },
+              { key: "nbViral", label: ">2.5x", render: r => r.nbViral > 0 ? <span style={{ color: "#fbbf24" }}>{r.nbViral}</span> : <span style={{ color: "rgba(255,255,255,0.25)" }}>0</span> },
+              { key: "nbFroid", label: "\u2744\ufe0f", render: r => <span style={{ color: "#60a5fa" }}>{r.nbFroid}</span> },
+              { key: "nbChaud", label: "\ud83d\udd25", render: r => <span style={{ color: "#f59e0b" }}>{r.nbChaud}</span> },
+              { key: "lastWeek", label: "Dern.", render: r => <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 11 }}>{r.lastWeek}</span> },
             ]} />
         </>)}
 
