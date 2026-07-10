@@ -13,11 +13,11 @@ const fmt = v => {
   return n.toLocaleString("fr-FR");
 };
 const fmtDate = v => { if (!v) return "\u2014"; try { const d = new Date(v); return isNaN(d) ? "\u2014" : d.toLocaleDateString("fr-FR"); } catch { return "\u2014"; } };
-const typeIcon = t => { if (!t) return "\ud83d\udcdd"; const l = t.toLowerCase(); if (l.includes("video") || l.includes("reel") || l.includes("short")) return "\ud83c\udfac"; if (l.includes("sidecar") || l.includes("carousel")) return "\ud83d\udcf8"; return "\ud83d\uddbc"; };
-const isVideo = t => { if (!t) return false; const l = t.toLowerCase(); return l.includes("video") || l.includes("reel") || l.includes("short"); };
+const typeIcon = t => { if (!t && t !== 0) return "\ud83d\udcdd"; const l = String(t).toLowerCase(); if (l.includes("video") || l.includes("reel") || l.includes("short")) return "\ud83c\udfac"; if (l.includes("sidecar") || l.includes("carousel")) return "\ud83d\udcf8"; return "\ud83d\uddbc"; };
+const isVideo = t => { if (!t && t !== 0) return false; const l = String(t).toLowerCase(); return l.includes("video") || l.includes("reel") || l.includes("short"); };
 const calcEng = r => { const v = Number(r.views) || 0, l = Number(r.likes) || 0, c = Number(r.comments) || 0; return v > 0 ? (l + c) / v : 0; };
 const renderEng = r => { const e = calcEng(r); return e > 0 ? <span style={{ color: "#34d399", fontWeight: 600 }}>{(e * 100).toFixed(2)}%</span> : "\u2014"; };
-const cleanCap = c => (c || "").replace(/[^\w\s\u00e0-\u00ff\u0152\u0153.,!?:()@#%\u20ac$&+\-'/]/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+const cleanCap = c => String(c || "").replace(/[^\w\s\u00e0-\u00ff\u0152\u0153.,!?:()@#%\u20ac$&+\-'/]/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
 
 /* ─── PLATFORM ICONS (Instagram + TikTok) ─── */
 const platformIcon = p => { if (p === "tiktok") return "\ud83c\udfb5"; if (p === "youtube") return "\u25b6\ufe0f"; return "\ud83d\udcf8"; };
@@ -117,8 +117,8 @@ const HOT_KEYWORDS = [
 ];
 
 const normalizeText = (text) => {
-  if (!text) return "";
-  return text.toLowerCase().replace(/[\n\r\t]/g, " ").replace(/\s+/g, " ").trim();
+  if (text === null || text === undefined) return "";
+  return String(text).toLowerCase().replace(/[\n\r\t]/g, " ").replace(/\s+/g, " ").trim();
 };
 const isHotCaption = (caption) => { const n = normalizeText(caption); if (!n) return false; return HOT_KEYWORDS.some(kw => n.includes(kw)); };
 const getHotKeywords = (caption) => { const n = normalizeText(caption); if (!n) return []; return HOT_KEYWORDS.filter(kw => n.includes(kw)); };
@@ -127,22 +127,23 @@ const getHotKeywords = (caption) => { const n = normalizeText(caption); if (!n) 
 function mapRow(row) {
   const keys = Object.keys(row);
   const g = k => { const v = row[k]; return (v !== undefined && v !== null && v !== "") ? v : null; };
+  const str = v => (v === null || v === undefined) ? "" : String(v); // force string
 
   /* ── TikTok ── */
   const isTikTok = keys.some(k => k.includes("authorMeta") || k === "playCount" || k === "diggCount");
   if (isTikTok) {
     const dateVal = g("createTimeISO");
     return {
-      compte: g("authorMeta.name") || "\u2014",
+      compte: str(g("authorMeta.name")) || "\u2014",
       date: dateVal,
       week: getWeekLabel(dateVal),
       type: "Video",
-      caption: g("text") || "\u2014",
+      caption: str(g("text")) || "\u2014",
       views: g("playCount"),
       likes: g("diggCount"),
       comments: g("commentCount"),
       shares: g("shareCount"),
-      url: g("webVideoUrl") || "",
+      url: str(g("webVideoUrl")),
       isPaid: null,
       platform: "tiktok"
     };
@@ -153,18 +154,18 @@ function mapRow(row) {
   const hasViewCount = keys.includes("viewCount");
   if (hasYTCols && hasViewCount) {
     const dateVal = g("date");
-    const caption = [g("title"), g("text")].filter(Boolean).join(" — ") || "\u2014";
+    const caption = [g("title"), g("text")].filter(Boolean).map(String).join(" \u2014 ") || "\u2014";
     return {
-      compte: g("channelName") || g("channelUsername") || "\u2014",
+      compte: str(g("channelName") || g("channelUsername")) || "\u2014",
       date: dateVal,
       week: getWeekLabel(dateVal),
-      type: g("type") || "shorts",
+      type: str(g("type")) || "shorts",
       caption: caption,
       views: g("viewCount"),
       likes: g("likes"),
       comments: g("commentsCount"),
       shares: null,
-      url: g("url") || "",
+      url: str(g("url")),
       isPaid: g("isPaidContent") === true || g("isPaidContent") === "true" ? true : null,
       platform: "youtube"
     };
@@ -174,16 +175,16 @@ function mapRow(row) {
   const paid = g("isPaidPartnership") || g("paidPartnership") || g("is_paid_partnership") || g("paid_partnership") || g("brandedContentTagName") || g("branded_content_tag_name") || g("sponsorTags/0") || g("sponsor_tags/0");
   const dateVal = g("timestamp");
   return {
-    compte: g("ownerUsername") || g("ownerFullName") || "\u2014",
+    compte: str(g("ownerUsername") || g("ownerFullName")) || "\u2014",
     date: dateVal,
     week: getWeekLabel(dateVal),
-    type: g("type") || g("productType") || "",
-    caption: g("caption") || "\u2014",
+    type: str(g("type") || g("productType")),
+    caption: str(g("caption")) || "\u2014",
     views: g("videoViewCount") ?? g("videoPlayCount"),
     likes: g("likesCount"),
     comments: g("commentsCount"),
     shares: g("sharesCount"),
-    url: g("url") || "",
+    url: str(g("url")),
     isPaid: paid,
     platform: "instagram"
   };
@@ -496,7 +497,7 @@ export default function Dashboard({ env = "prod" }) {
 
   const sponsoRows = useMemo(() => {
     const kw = ["partenariat r\u00e9mun\u00e9r\u00e9", "partenariat remunere", "collaboration commerciale", "partenariat"];
-    return rows.filter(r => { const c = (r.caption || "").toLowerCase(); return kw.some(k => c.includes(k)) || !!r.isPaid; });
+    return rows.filter(r => { const c = String(r.caption || "").toLowerCase(); return kw.some(k => c.includes(k)) || !!r.isPaid; });
   }, [rows]);
 
   const tot = k => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
@@ -594,7 +595,7 @@ export default function Dashboard({ env = "prod" }) {
               { key: "week", label: "Sem.", color: "rgba(255,255,255,0.4)" },
               { key: "tempType", label: "", render: r => r.tempType === "chaud" ? <span title={"Chaud" + (r.hotKeywordsFound ? " : " + r.hotKeywordsFound : "")} style={{ cursor: "help" }}>\ud83d\udd25</span> : <span title="Froid">\u2744\ufe0f</span> },
               { key: "type", label: "", render: r => typeIcon(r.type) },
-              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 110)}</a> : r.caption?.slice(0, 110) },
+              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{String(r.caption || "").slice(0, 110)}</a> : String(r.caption || "").slice(0, 110) },
               { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
               { key: "likes", label: "Likes", fmt: true, color: "#f472b6" },
               { key: "comments", label: "Com.", fmt: true, color: "#60a5fa" },
@@ -655,7 +656,7 @@ export default function Dashboard({ env = "prod" }) {
               { key: "compte", label: "Compte", bold: true, color: "#fff" },
               { key: "date", label: "Date", render: r => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
               { key: "week", label: "Sem.", color: "rgba(255,255,255,0.4)" },
-              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 80)}</a> : r.caption?.slice(0, 80) },
+              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{String(r.caption || "").slice(0, 80)}</a> : String(r.caption || "").slice(0, 80) },
               { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
               { key: "avgCompte", label: "Moy.", fmt: true, color: "rgba(255,255,255,0.4)" },
               { key: "ratio", label: "Ratio", render: r => <span style={{ color: "#fbbf24", fontWeight: 700 }}>{r.ratio}x</span> },
@@ -685,7 +686,7 @@ export default function Dashboard({ env = "prod" }) {
               platCol,
               { key: "compte", label: "Compte", bold: true, color: "#fff" },
               { key: "date", label: "Date", render: r => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
-              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 90)}</a> : r.caption?.slice(0, 90) },
+              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{String(r.caption || "").slice(0, 90)}</a> : String(r.caption || "").slice(0, 90) },
               { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
               { key: "ratioVues", label: "x moy.", render: r => <span style={{ color: "#818cf8" }}>{r.ratioVues}x</span> },
               { key: "eng", label: "Engage.", render: r => <span style={{ color: "#f472b6", fontWeight: 600 }}>{(r.eng * 100).toFixed(2)}%</span> },
@@ -703,7 +704,7 @@ export default function Dashboard({ env = "prod" }) {
               { key: "compte", label: "Compte", bold: true, color: "#fff" },
               { key: "date", label: "Date", render: r => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
               { key: "type", label: "", render: r => typeIcon(r.type) },
-              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{r.caption?.slice(0, 110)}</a> : r.caption?.slice(0, 110) },
+              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{String(r.caption || "").slice(0, 110)}</a> : String(r.caption || "").slice(0, 110) },
               { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
               { key: "likes", label: "Likes", fmt: true, color: "#f472b6" },
               { key: "comments", label: "Com.", fmt: true, color: "#60a5fa" },
