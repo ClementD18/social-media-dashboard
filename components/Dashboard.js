@@ -180,7 +180,7 @@ function mapRow(row) {
     week: getWeekLabel(dateVal),
     type: str(g("type") || g("productType")),
     caption: str(g("caption")) || "\u2014",
-    views: g("videoViewCount") ?? g("videoPlayCount"),
+    views: Math.max(Number(g("videoViewCount")) || 0, Number(g("videoPlayCount")) || 0) || null,
     likes: g("likesCount"),
     comments: g("commentsCount"),
     shares: g("sharesCount"),
