@@ -186,9 +186,10 @@ function mapRow(row) {
     };
   }
 
-  /* ── Facebook (détection : actors/0/name ou reactionCount ou playCountRounded) ── */
-  const isFacebook = keys.some(k => k === "actors/0/name" || k === "reactionCount" || k === "playCountRounded");
-  if (isFacebook) {
+  /* ── Facebook (2 formats de scraper Apify) ── */
+  /* Format 1 : facebook-reels-and-page-profile-scraper (actors/0/name, reactionCount, playCountRounded) */
+  const isFbReels = keys.some(k => k === "actors/0/name" || k === "reactionCount" || k === "playCountRounded");
+  if (isFbReels) {
     const ts = g("creation_time");
     const dateVal = ts ? new Date(Number(ts) * 1000).toISOString() : null;
     return {
@@ -202,6 +203,27 @@ function mapRow(row) {
       comments: g("commentCount"),
       shares: g("shareCount"),
       url: str(g("url")),
+      isPaid: null,
+      platform: "facebook"
+    };
+  }
+  /* Format 2 : facebook-posts-scraper (pageName, viewsCount, isVideo) — on ne garde que les vidéos */
+  const isFbPosts = keys.includes("pageName") && keys.includes("viewsCount");
+  if (isFbPosts) {
+    const views = Number(g("viewsCount")) || 0;
+    if (views === 0) return null; /* Pas de vues = pas une vidéo → on skip */
+    const dateVal = g("time") || null;
+    return {
+      compte: str(g("pageName")) || "\u2014",
+      date: dateVal,
+      week: getWeekLabel(dateVal),
+      type: "reel",
+      caption: str(g("text")) || "\u2014",
+      views: views,
+      likes: g("likes"),
+      comments: g("comments"),
+      shares: g("shares"),
+      url: str(g("url") || g("topLevelUrl")),
       isPaid: null,
       platform: "facebook"
     };
@@ -408,7 +430,7 @@ export default function Dashboard({ env = "prod" }) {
   /* ── Import direct avec dédoublonnage (plus hautes vues) ── */
   const loadFile = useCallback((f) => {
     Papa.parse(f, { header: true, dynamicTyping: true, skipEmptyLines: true, complete: (r) => {
-      const mapped = r.data.map(mapRow).filter(x => x.date || x.caption !== "\u2014");
+      const mapped = r.data.map(mapRow).filter(x => x && (x.date || x.caption !== "\u2014"));
       setRows(prev => {
         const byUrl = new Map();
         prev.forEach(r => { const u = (r.url || "").replace(/\/$/, ""); if (u) byUrl.set(u, r); });
