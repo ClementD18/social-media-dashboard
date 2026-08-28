@@ -207,10 +207,10 @@ function mapRow(row) {
       platform: "facebook"
     };
   }
-  /* Format 2 : facebook-posts-scraper (pageName, viewsCount, isVideo) — on ne garde que les vidéos */
-  const isFbPosts = keys.includes("pageName") && keys.includes("viewsCount");
+  /* Format 2 : facebook-posts-scraper (pageName, viewsCount) — on ne garde que les vidéos */
+  const isFbPosts = keys.includes("pageName") && (keys.includes("viewsCount") || keys.includes("videoPostViewCount"));
   if (isFbPosts) {
-    const views = Number(g("viewsCount")) || 0;
+    const views = Math.max(Number(g("viewsCount")) || 0, Number(g("videoPostViewCount")) || 0);
     if (views === 0) return null; /* Pas de vues = pas une vidéo → on skip */
     const dateVal = g("time") || null;
     return {
@@ -335,17 +335,17 @@ const platCol = { key: "platform", label: "Plat.", render: r => <span title={r.p
 const KPI = ({ items }) => <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8, marginBottom: 12 }}>{items.map(([l,v,c]) => <div key={l} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "10px 12px" }}><div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>{l}</div><div style={{ fontSize: 18, fontWeight: 700, color: c }}>{v}</div></div>)}</div>;
 
 /* ─── EXPORT BUILDERS ─── */
-const expContenus = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.week || "", r.tempType || "", r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
+const expContenus = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.week || "", r.tempType || "", r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", r.shares ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
 const expMarques = rows => rows.map(b => [b.compte, b.platforms?.join("+"), b.nbVideos, b.nbWeeks, b.avgVidsPerWeek, b.avgFroidPerWeek, b.avgChaudPerWeek, Math.round(b.avgViews), Math.round(b.avgViewsHot), Math.round(b.medianCold), (b.avgEngCold*100).toFixed(2)+"%", (b.avgEngHot*100).toFixed(2)+"%", b.nbViral, b.nbFroid, b.nbChaud, b.lastWeek]);
 const expViraux = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.week || "", cleanCap(r.caption), r.views ?? "", r.avgCompte ?? "", r.ratio ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.tempType || "", r.hotKeywordsFound || "", r.url]; });
 const expSuspects = rows => rows.map(r => [r.platform, r.compte, fmtDate(r.date), cleanCap(r.caption), r.views ?? "", r.ratioVues ?? "", (r.eng*100).toFixed(2)+"%", (r.avgEngCompte*100).toFixed(2)+"%", r.url]);
-const expSponso = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
+const expSponso = rows => rows.map(r => { const e = calcEng(r); return [r.platform, r.compte, fmtDate(r.date), r.type, cleanCap(r.caption), r.views ?? "", r.likes ?? "", r.comments ?? "", r.shares ?? "", e > 0 ? (e*100).toFixed(2)+"%" : "", r.url]; });
 
-const hContenus = ["Plateforme","Compte","Date","Semaine","Chaud/Froid","Type","Caption","Vues","Likes","Com.","Engagement","URL"];
+const hContenus = ["Plateforme","Compte","Date","Semaine","Chaud/Froid","Type","Caption","Vues","Likes","Com.","Partages","Engagement","URL"];
 const hMarques = ["Compte","Plateformes","Vid\u00e9os","Semaines","Pub/Sem.","Froid/Sem.","Chaud/Sem.","Moy. vues froid","Moy. vues chaud","M\u00e9diane froid","Eng. froid","Eng. chaud","Virales","Froid","Chaud","Derni\u00e8re sem."];
 const hViraux = ["Plateforme","Compte","Date","Semaine","Caption","Vues","Moy.","Ratio","Engagement","Type","Mots-cl\u00e9s","URL"];
 const hSuspects = ["Plateforme","Compte","Date","Caption","Vues","Ratio","Engagement","Moy. eng.","URL"];
-const hSponso = ["Plateforme","Compte","Date","Type","Caption","Vues","Likes","Com.","Engagement","URL"];
+const hSponso = ["Plateforme","Compte","Date","Type","Caption","Vues","Likes","Com.","Partages","Engagement","URL"];
 
 /* ─── STORAGE HELPERS ─── */
 const storageKey = (env, suffix) => `dashboard-${env}-${suffix}`;
@@ -646,19 +646,20 @@ export default function Dashboard({ env = "prod" }) {
         {/* CONTENUS */}
         {page === "contenus" && (<>
           <KPI items={[["\ud83d\udcdd Posts", rows.length, "#a78bfa"], ["\ud83c\udfac Vid\u00e9os", rows.filter(r => isVideo(r.type) || r.platform === "tiktok").length, "#c084fc"], ["\ud83d\udc41 Vues", fmt(tot("views")), "#818cf8"], ["\u2764\ufe0f Likes", fmt(tot("likes")), "#f472b6"], ["\u2744\ufe0f Froid", rowsWithType.filter(r => r.tempType === "froid").length, "#60a5fa"], ["\ud83d\udd25 Chaud", rowsWithType.filter(r => r.tempType === "chaud").length, "#ef4444"]]} />
-          <SortTable data={rowsWithType} gridCols="30px 90px 70px 45px 30px 35px 1fr 70px 55px 50px 60px" exportData={expContenus} exportHeaders={hContenus} exportName="contenus"
+          <SortTable data={rowsWithType} gridCols="30px 85px 65px 40px 28px 30px 1fr 65px 50px 45px 50px 58px" exportData={expContenus} exportHeaders={hContenus} exportName="contenus"
             columns={[
               platCol,
               { key: "compte", label: "Compte", bold: true, color: "#fff" },
               { key: "date", label: "Date", render: r => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
               { key: "week", label: "Sem.", color: "rgba(255,255,255,0.4)" },
-              { key: "tempType", label: "", render: r => r.tempType === "chaud" ? <span title={"Chaud" + (r.hotKeywordsFound ? " : " + r.hotKeywordsFound : "")} style={{ cursor: "help" }}>\ud83d\udd25</span> : <span title="Froid">\u2744\ufe0f</span> },
+              { key: "tempType", label: "", render: r => r.tempType === "chaud" ? <span title={"Chaud" + (r.hotKeywordsFound ? " : " + r.hotKeywordsFound : "")} style={{ cursor: "help" }}>{"\ud83d\udd25"}</span> : <span title="Froid">{"\u2744\ufe0f"}</span> },
               { key: "type", label: "", render: r => typeIcon(r.type) },
-              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{String(r.caption || "").slice(0, 110)}</a> : String(r.caption || "").slice(0, 110) },
+              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{String(r.caption || "").slice(0, 100)}</a> : String(r.caption || "").slice(0, 100) },
               { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
               { key: "likes", label: "Likes", fmt: true, color: "#f472b6" },
               { key: "comments", label: "Com.", fmt: true, color: "#60a5fa" },
-              { key: "engagement", label: "Engage.", render: renderEng, color: "#34d399" },
+              { key: "shares", label: "Part.", fmt: true, color: "#a78bfa" },
+              { key: "engagement", label: "Eng.", render: renderEng, color: "#34d399" },
             ]} />
         </>)}
 
@@ -757,17 +758,18 @@ export default function Dashboard({ env = "prod" }) {
         {/* SPONSOS */}
         {page === "sponso" && (<>
           <KPI items={[["\ud83e\udd1d Sponsos", sponsoRows.length, "#34d399"], ["\ud83c\udfe2 Comptes", _.uniqBy(sponsoRows, "compte").length, "#a78bfa"], ["\ud83d\udc41 Vues moy.", fmt(Math.round(_.meanBy(sponsoRows, r => Number(r.views) || 0) || 0)), "#818cf8"], ["\u2764\ufe0f Likes moy.", fmt(Math.round(_.meanBy(sponsoRows, r => Number(r.likes) || 0) || 0)), "#f472b6"]]} />
-          <SortTable data={sponsoRows} gridCols="30px 95px 75px 35px 1fr 75px 60px 55px 70px 30px" exportData={expSponso} exportHeaders={hSponso} exportName="sponso"
+          <SortTable data={sponsoRows} gridCols="30px 90px 70px 35px 1fr 70px 55px 50px 50px 60px 30px" exportData={expSponso} exportHeaders={hSponso} exportName="sponso"
             columns={[
               platCol,
               { key: "compte", label: "Compte", bold: true, color: "#fff" },
               { key: "date", label: "Date", render: r => fmtDate(r.date), color: "rgba(255,255,255,0.5)" },
               { key: "type", label: "", render: r => typeIcon(r.type) },
-              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{String(r.caption || "").slice(0, 110)}</a> : String(r.caption || "").slice(0, 110) },
+              { key: "caption", label: "Caption", title: true, color: "rgba(255,255,255,0.75)", render: r => r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>{String(r.caption || "").slice(0, 100)}</a> : String(r.caption || "").slice(0, 100) },
               { key: "views", label: "Vues", fmt: true, bold: true, color: "#818cf8" },
               { key: "likes", label: "Likes", fmt: true, color: "#f472b6" },
               { key: "comments", label: "Com.", fmt: true, color: "#60a5fa" },
-              { key: "engagement", label: "Engage.", render: renderEng, color: "#34d399" },
+              { key: "shares", label: "Part.", fmt: true, color: "#a78bfa" },
+              { key: "engagement", label: "Eng.", render: renderEng, color: "#34d399" },
               linkCol,
             ]} />
         </>)}
